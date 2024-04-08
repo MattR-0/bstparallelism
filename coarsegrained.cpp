@@ -1,5 +1,7 @@
-// Sequential implementation of AVL tree
+// Coarse-grained lock implementation of AVL tree
 #include <bits/stdc++.h>
+#include <omp.h>
+#include <string>
 using namespace std;
 
 // An AVL tree node
@@ -9,6 +11,12 @@ class Node {
     Node *left;
     Node *right;
     int height;
+};
+
+// Operation read from file
+struct Operation {
+    string op;
+    int key;
 };
 
 // A utility function to get height of tree
@@ -194,37 +202,69 @@ void preOrder(Node *root) {
     }
 }
 
-// Driver Code
-int main() {
-    Node *root = NULL;
-    // Constructing example tree
-    root = insert(root, 10);
-    root = insert(root, 20);
-    root = insert(root, 30);
-    root = insert(root, 40);
-    root = insert(root, 50);
-    root = insert(root, 25);
-    /* The constructed AVL Tree would be
-            30
-            / \
-           20 40
-          / \   \
-         10 25  50
-    */
-    cout << "Preorder traversal of the constructed AVL tree: \n";
-    preOrder(root);
+int main(int argc, char *argv[]) {
+    std::string input_filename;
+    int num_threads = 0;
+    int opt;
+    while ((opt = getopt(argc, argv, "f:n:p:i:m:b:")) != -1) {
+        switch (opt) {
+        case 'f':
+            input_filename = optarg;
+            break;
+        case 'n':
+            num_threads = atoi(optarg);
+            break;
+        default:
+            std::cerr << "Usage: " << argv[0] << " -f input_filename -n num_threads [-p SA_prob] [-i SA_iters] -m parallel_mode -b batch_size\n";
+            exit(EXIT_FAILURE);
+        }
+    }
 
-    root = deleteNode(root, 10);
-    /* The AVL Tree after deletion of 10
-         1
-        / \
-       0   9
-      /   / \
-    -1   5   11
-        / \
-       2   6
-    */
-    cout << "Preorder traversal after deletion of 10: \n";
+    // Check if required options are provided
+    if (empty(input_filename) || num_threads <= 0) {
+        std::cerr << "Usage: " << argv[0] << " -f input_filename -n num_threads\n";
+        exit(EXIT_FAILURE);
+    }
+    std::cout << "Input file: " << input_filename << '\n';
+    std::cout << "Number of threads: " << num_threads << '\n';
+    std::ifstream fin(input_filename);
+    if (!fin) {
+        std::cerr << "Unable to open file: " << input_filename << ".\n";
+        exit(EXIT_FAILURE);
+    }
+
+    // Read input file
+    int numOps;
+    fin >> numOps;
+    std::vector<Operation> inputOps(numOps);
+    for (auto& inputOp : inputOps) {
+        fin >> inputOp.op >> inputOp.key;
+        if (inputOp.op!='insert' || inputOp.op!='delete' || inputOp.op!='search') {
+            std::cerr << "Usage: {operator} {key}.\nInvalid operator: " << inputOp.op << ".\n";
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    // Execute operations in parallel
+    Node *root = NULL;
+    omp_lock_t *coarseLock = (omp_lock_t *)calloc(1, sizeof(omp_lock_t));
+    omp_init_lock(&coarseLock);
+    #pragma omp parallel for
+    for (int i=0; i<numOps; i++) {
+        inputOp = inputOps[i];
+        if (inputOp.op == 'insert') {
+            omp_set_lock(&coarseLock);
+            insert(root, inputOp.key);
+            omp_unset_lock(&coarseLock);
+        } else if (inputOp.op == 'delete') {
+            omp_set_lock(&coarseLock);
+            deleteNode(root, inputOp.key);
+            omp_unset_lock(&coarseLock);
+        } else if (inputOp.op == 'search') {
+            omp_set_lock(&coarseLock);
+            search(root, inputOp.key);
+            omp_unset_lock(&coarseLock);
+        }
+    }
     preOrder(root);
-    return 0;
 }

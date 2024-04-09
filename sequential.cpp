@@ -136,11 +136,9 @@ Node *deleteNode(Node *root, int key) {
             free(temp);
         }
         else {
-            // node with two children: Get the inorder
-            // successor (smallest in the right subtree)
+            // Get the inorder successor (smallest in the right subtree)
             Node *temp = minValueNode(root->right);
-            // Copy the inorder successor's
-            // data to this node
+            // Copy the inorder successor's data to this node
             root->key = temp->key;
             // Delete the inorder successor
             root->right = deleteNode(root->right, temp->key);

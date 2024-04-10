@@ -43,6 +43,8 @@ int main(int argc, char *argv[]) {
         } else if (op == "search") {
             bool found = tree.search(tree.root, key);
             std::cout << key << (found ? " is present" : " is not present") << " in the tree.\n";
+        } else if (op == "preorder") {
+            tree.preOrder(tree.root);
         } else {
             std::cerr << "Invalid operation: " << op << "\n";
         }

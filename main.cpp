@@ -2,6 +2,12 @@
 #include <fstream>
 #include <getopt.h>
 
+// Operation read from file
+struct Operation {
+    std::string op;
+    int key;
+};
+
 int main(int argc, char *argv[]) {
     std::string input_filename;
     int num_threads = 0;
@@ -32,22 +38,31 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
+    omp_set_num_threads(num_threads);
     AVLTree tree;
     std::string op;
     int key;
+    std::vector<Operation> ops;
     while (fin >> op >> key) {
-        if (op == "insert") {
-            tree.insert(tree.root, key);
-        } else if (op == "delete") {
-            tree.deleteNode(tree.root, key);
-        } else if (op == "search") {
-            bool found = tree.search(tree.root, key);
-            std::cout << key << (found ? " is present" : " is not present") << " in the tree.\n";
-        } else if (op == "preorder") {
+        Operation opStruct{op, key};
+        ops.push_back(opStruct);
+    }
+    #pragma omp parallel for
+    for (auto& inputOp : ops) {
+        if (inputOp.op == "insert")
+            tree.root = tree.insert(tree.root, inputOp.key);
+        else if (inputOp.op == "delete")
+            tree.root = tree.deleteNode(tree.root, inputOp.key);
+        else if (inputOp.op == "search") {
+            bool found = tree.search(tree.root, inputOp.key);
+            if (found)
+                std::cout << inputOp.key << " is present in the tree.\n";
+            else
+                std::cout << inputOp.key << " is not present in the tree.\n";
+        } else if (inputOp.op == "preorder")
             tree.preOrder(tree.root);
-        } else {
-            std::cerr << "Invalid operation: " << op << "\n";
-        }
+        else
+            std::cerr << "Invalid operation: " << inputOp.op << "\n";
     }
 
     tree.preOrder(tree.root);

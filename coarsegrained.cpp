@@ -1,4 +1,5 @@
 #include "coarsegrained.h"
+#include <omp.h>
 
 Node::Node(int k) : key(k), left(nullptr), right(nullptr), height(1) {}
 
@@ -85,14 +86,14 @@ Node* AVLTree::minValueNode(Node* node) {
 
 // Recursive function to insert a key in the subtree rooted with node.
 // Returns the new root of the subtree.
-Node* AVLTree::insert(Node* node, int key) {
+Node* AVLTree::insertHelper(Node* node, int key) {
     // 1. Perform the normal BST insertion
     if (node == nullptr)
         return new Node(key);
     if (key < node->key)
-        node->left = insert(node->left, key);
+        node->left = insertHelper(node->left, key);
     else if (key > node->key)
-        node->right = insert(node->right, key);
+        node->right = insertHelper(node->right, key);
     else
         return node;
     // 2. Update height of this ancestor node
@@ -115,70 +116,105 @@ Node* AVLTree::insert(Node* node, int key) {
     return node;
 }
 
+// Public insert function that wraps the helper
+Node* AVLTree::insert(Node* node, int key) {
+    startWrite();
+    Node* res = insertHelper(root, key);
+    endWrite();
+    return res;
+}
+
 // Recursive function to delete a node with given key from subtree with given root.
 // Returns root of the modified subtree.
-Node* AVLTree::deleteNode(Node* root, int key) {
+Node* AVLTree::deleteHelper(Node* node, int key) {
     // STEP 1: Perform standard BST delete
-    if (root == nullptr)
-        return root;
-    if (key < root->key)
-        root->left = deleteNode(root->left, key);
-    else if (key > root->key)
-        root->right = deleteNode(root->right, key);
+    if (node == nullptr)
+        return node;
+    if (key < node->key)
+        node->left = deleteHelper(node->left, key);
+    else if (key > node->key)
+        node->right = deleteHelper(node->right, key);
     else { // This is the node to be deleted
-        if (root->left == nullptr || root->right == nullptr) {
-            Node* temp = root->left ? root->left : root->right;
+        if (node->left == nullptr || node->right == nullptr) {
+            Node* temp = node->left ? node->left : node->right;
             if (temp == nullptr) {
-                temp = root;
-                root = nullptr;
+                temp = node;
+                node = nullptr;
             } else {
-                *root = *temp;
+                *node = *temp;
             }
             delete temp;
         } else {
-            Node* temp = minValueNode(root->right);
-            root->key = temp->key;
-            root->right = deleteNode(root->right, temp->key);
+            Node* temp = minValueNode(node->right);
+            node->key = temp->key;
+            node->right = deleteHelper(node->right, temp->key);
         }
     }
-    if (root == nullptr)
-      return root;
+    if (node == nullptr)
+      return node;
     // Step 2: update height of the current node
-    root->height = 1 + std::max(height(root->left), height(root->right));
+    node->height = 1 + std::max(height(node->left), height(node->right));
     // Step 3: check whether this node became unbalanced
-    int balance = getBalance(root);
-    if (balance > 1 && getBalance(root->left) >= 0)
-        return rightRotate(root);
-    if (balance > 1 && getBalance(root->left) < 0) {
-        root->left = leftRotate(root->left);
-        return rightRotate(root);
+    int balance = getBalance(node);
+    if (balance > 1 && getBalance(node->left) >= 0)
+        return rightRotate(node);
+    if (balance > 1 && getBalance(node->left) < 0) {
+        node->left = leftRotate(node->left);
+        return rightRotate(node);
     }
-    if (balance < -1 && getBalance(root->right) <= 0)
-        return leftRotate(root);
-    if (balance < -1 && getBalance(root->right) > 0) {
-        root->right = rightRotate(root->right);
-        return leftRotate(root);
+    if (balance < -1 && getBalance(node->right) <= 0)
+        return leftRotate(node);
+    if (balance < -1 && getBalance(node->right) > 0) {
+        node->right = rightRotate(node->right);
+        return leftRotate(node);
     }
-    return root;
+    return node;
+}
+
+// Public delete function that wraps the helper
+Node* AVLTree::deleteNode(Node* node, int key) {
+    startWrite();
+    Node* res = deleteHelper(root, key);
+    endWrite();
+    return res;
 }
 
 // Search for the given key in the subtree rooted with given node
-bool AVLTree::search(Node* node, int key) const {
+bool AVLTree::searchHelper(Node* node, int key) const {
     if (node == nullptr)
         return false;
     if (key == node->key)
         return true;
     if (key < node->key)
-        return search(node->left, key);
-    return search(node->right, key);
+        return searchHelper(node->left, key);
+    return searchHelper(node->right, key);
+}
+
+// Public search function that wraps the helper
+bool AVLTree::search(Node* node, int key) {
+    startRead();
+    bool found = searchHelper(node, key);
+    endRead();
+    return found;
 }
 
 // A utility function to print preorder traversal of the tree.
 // The function also prints the height of every node.
-void AVLTree::preOrder(Node* node) const {
+void AVLTree::preOrderHelper(Node* node) const {
     if (node != nullptr) {
         std::cout << node->key << " ";
-        preOrder(node->left);
-        preOrder(node->right);
+        preOrderHelper(node->left);
+        preOrderHelper(node->right);
+    }
+}
+
+// Preorder wrapper function
+void AVLTree::preOrder(Node* node) {
+    if (node != nullptr) {
+        startWrite();
+        std::cout << "preorder\n";
+        preOrderHelper(node);
+        std::cout << "\n";
+        endWrite();
     }
 }

@@ -18,12 +18,6 @@ class Node {
     int height;
 };
 
-// Operation read from file
-struct Operation {
-    string op;
-    int key;
-};
-
 // A utility function to get height of tree
 int height(Node *N) {
     if (N==NULL)

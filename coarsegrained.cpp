@@ -9,6 +9,13 @@ AVLTreeCG::~AVLTreeCG() {
     freeTree(root);
 }
 
+void AVLTreeCG::freeTree(Node *node) {
+	if (node == nullptr) return;
+	freeTree(root->left);
+	freeTree(root->right);
+	delete node;
+}
+
 void AVLTreeCG::startRead() {
     readLock.lock();
     readCount++;
@@ -86,9 +93,9 @@ Node* AVLTreeCG::insertHelper(Node* node, int key, bool& err) {
     if (node == nullptr)
         return new Node(key);
     if (key < node->key)
-        node->left = insertHelper(node->left, key);
+        node->left = insertHelper(node->left, key, err);
     else if (key > node->key)
-        node->right = insertHelper(node->right, key);
+        node->right = insertHelper(node->right, key, err);
     else {
         err = true;
         return node;
@@ -114,7 +121,7 @@ Node* AVLTreeCG::insertHelper(Node* node, int key, bool& err) {
 }
 
 // Public insert function that wraps the helper
-bool AVLTreeCG::insert(Node* node, int key) {
+bool AVLTreeCG::insert(int key) {
     bool err = false;
     startWrite();
     root = insertHelper(root, key, err);
@@ -131,9 +138,9 @@ Node* AVLTreeCG::deleteHelper(Node* node, int key, bool& err) {
         return node;
     }
     if (key < node->key)
-        node->left = deleteHelper(node->left, key);
+        node->left = deleteHelper(node->left, key, err);
     else if (key > node->key)
-        node->right = deleteHelper(node->right, key);
+        node->right = deleteHelper(node->right, key, err);
     else { // This is the node to be deleted
         if (node->left == nullptr || node->right == nullptr) {
             Node* temp = node->left ? node->left : node->right;
@@ -147,7 +154,7 @@ Node* AVLTreeCG::deleteHelper(Node* node, int key, bool& err) {
         } else {
             Node* temp = minValueNode(node->right);
             node->key = temp->key;
-            node->right = deleteHelper(node->right, temp->key);
+            node->right = deleteHelper(node->right, temp->key, err);
         }
     }
     if (node == nullptr) {
@@ -174,7 +181,7 @@ Node* AVLTreeCG::deleteHelper(Node* node, int key, bool& err) {
 }
 
 // Public delete function that wraps the helper
-bool AVLTreeCG::deleteNode(Node* node, int key) {
+bool AVLTreeCG::deleteNode(int key) {
     bool err = false;
     startWrite();
     Node* res = deleteHelper(root, key, err);
@@ -194,9 +201,9 @@ bool AVLTreeCG::searchHelper(Node* node, int key) const {
 }
 
 // Public search function that wraps the helper
-bool AVLTreeCG::search(Node* node, int key) {
+bool AVLTreeCG::search(int key) {
     startRead();
-    bool found = searchHelper(node, key);
+    bool found = searchHelper(root, key);
     endRead();
     return found;
 }
@@ -212,12 +219,10 @@ void AVLTreeCG::preOrderHelper(Node* node) const {
 }
 
 // Preorder wrapper function
-void AVLTreeCG::preOrder(Node* node) {
-    if (node != nullptr) {
-        startWrite();
-        std::cout << "preorder\n";
-        preOrderHelper(node);
-        std::cout << "\n";
-        endWrite();
-    }
+void AVLTreeCG::preOrder() {
+    startWrite();
+    std::cout << "preorder\n";
+    preOrderHelper(root);
+    std::cout << "\n";
+    endWrite();
 }

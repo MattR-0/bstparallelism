@@ -1,43 +1,38 @@
 #include "coarsegrained.h"
-#include <omp.h>
+#include <mutex>
 
 Node::Node(int k) : key(k), left(nullptr), right(nullptr), height(1) {}
 
-AVLTreeCG::AVLTreeCG() : root(nullptr), readCount(0) {
-    omp_init_lock(&writeLock);
-    omp_init_lock(&readLock);
-}
+AVLTreeCG::AVLTreeCG() : root(nullptr), readCount(0) {}
 
 AVLTreeCG::~AVLTreeCG() {
-    // Ideally, add a method to recursively delete nodes to avoid memory leaks
-    omp_destroy_lock(&writeLock);
-    omp_destroy_lock(&readLock);
+    freeTree(root);
 }
 
 void AVLTreeCG::startRead() {
-    omp_set_lock(&readLock);
+    readLock.lock();
     readCount++;
     if (readCount == 1) {
-        omp_set_lock(&writeLock);  // First reader acquires write lock
+        writeLock.lock();
     }
-    omp_unset_lock(&readLock);
+    readLock.unlock();
 }
 
 void AVLTreeCG::endRead() {
-    omp_set_lock(&readLock);
+    readLock.lock();
     readCount--;
     if (readCount == 0) {
-        omp_unset_lock(&writeLock);  // Last reader releases write lock
+        writeLock.unlock();
     }
-    omp_unset_lock(&readLock);
+    readLock.unlock();
 }
 
 void AVLTreeCG::startWrite() {
-    omp_set_lock(&writeLock);
+    writeLock.lock();
 }
 
 void AVLTreeCG::endWrite() {
-    omp_unset_lock(&writeLock);
+    writeLock.unlock();
 }
 
 // A utility function to right rotate subtree rooted with y
@@ -86,7 +81,7 @@ Node* AVLTreeCG::minValueNode(Node* node) {
 
 // Recursive function to insert a key in the subtree rooted with node.
 // Returns the new root of the subtree.
-Node* AVLTreeCG::insertHelper(Node* node, int key) {
+Node* AVLTreeCG::insertHelper(Node* node, int key, bool& err) {
     // 1. Perform the normal BST insertion
     if (node == nullptr)
         return new Node(key);
@@ -94,8 +89,10 @@ Node* AVLTreeCG::insertHelper(Node* node, int key) {
         node->left = insertHelper(node->left, key);
     else if (key > node->key)
         node->right = insertHelper(node->right, key);
-    else
+    else {
+        err = true;
         return node;
+    }
     // 2. Update height of this ancestor node
     node->height = 1 + std::max(height(node->left), height(node->right));
     // 3. Get the balance factor of this ancestor node to check this node's balance
@@ -117,19 +114,22 @@ Node* AVLTreeCG::insertHelper(Node* node, int key) {
 }
 
 // Public insert function that wraps the helper
-Node* AVLTreeCG::insert(Node* node, int key) {
+bool AVLTreeCG::insert(Node* node, int key) {
+    bool err = false;
     startWrite();
-    Node* res = insertHelper(root, key);
+    root = insertHelper(root, key, err);
     endWrite();
-    return res;
+    return !err;
 }
 
 // Recursive function to delete a node with given key from subtree with given root.
 // Returns root of the modified subtree.
-Node* AVLTreeCG::deleteHelper(Node* node, int key) {
+Node* AVLTreeCG::deleteHelper(Node* node, int key, bool& err) {
     // STEP 1: Perform standard BST delete
-    if (node == nullptr)
+    if (node == nullptr) {
+        err = true;
         return node;
+    }
     if (key < node->key)
         node->left = deleteHelper(node->left, key);
     else if (key > node->key)
@@ -150,8 +150,10 @@ Node* AVLTreeCG::deleteHelper(Node* node, int key) {
             node->right = deleteHelper(node->right, temp->key);
         }
     }
-    if (node == nullptr)
-      return node;
+    if (node == nullptr) {
+        err = true;
+        return node;
+    }
     // Step 2: update height of the current node
     node->height = 1 + std::max(height(node->left), height(node->right));
     // Step 3: check whether this node became unbalanced
@@ -172,11 +174,12 @@ Node* AVLTreeCG::deleteHelper(Node* node, int key) {
 }
 
 // Public delete function that wraps the helper
-Node* AVLTreeCG::deleteNode(Node* node, int key) {
+bool AVLTreeCG::deleteNode(Node* node, int key) {
+    bool err = false;
     startWrite();
-    Node* res = deleteHelper(root, key);
+    Node* res = deleteHelper(root, key, err);
     endWrite();
-    return res;
+    return !err;
 }
 
 // Search for the given key in the subtree rooted with given node

@@ -12,15 +12,11 @@ public:
     Node(int key);
 };
 
-class AVLTree {
+class AVLTreeCG {
 public:
     Node* root;
-    omp_lock_t readLock;
-    omp_lock_t writeLock;
-    int readCount;
-
-    AVLTree();
-    ~AVLTree();
+    AVLTreeCG();
+    ~AVLTreeCG();
 
     Node* insert(Node* node, int key);
     Node* deleteNode(Node* node, int key);
@@ -28,6 +24,10 @@ public:
     void preOrder(Node* node);
 
 private:
+    omp_lock_t readLock;
+    omp_lock_t writeLock;
+    int readCount;
+    
     Node* rightRotate(Node* y);
     Node* leftRotate(Node* x);
     int getBalance(Node* N) const;

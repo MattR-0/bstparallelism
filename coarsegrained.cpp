@@ -3,18 +3,18 @@
 
 Node::Node(int k) : key(k), left(nullptr), right(nullptr), height(1) {}
 
-AVLTree::AVLTree() : root(nullptr), readCount(0) {
+AVLTreeCG::AVLTreeCG() : root(nullptr), readCount(0) {
     omp_init_lock(&writeLock);
     omp_init_lock(&readLock);
 }
 
-AVLTree::~AVLTree() {
+AVLTreeCG::~AVLTreeCG() {
     // Ideally, add a method to recursively delete nodes to avoid memory leaks
     omp_destroy_lock(&writeLock);
     omp_destroy_lock(&readLock);
 }
 
-void AVLTree::startRead() {
+void AVLTreeCG::startRead() {
     omp_set_lock(&readLock);
     readCount++;
     if (readCount == 1) {
@@ -23,7 +23,7 @@ void AVLTree::startRead() {
     omp_unset_lock(&readLock);
 }
 
-void AVLTree::endRead() {
+void AVLTreeCG::endRead() {
     omp_set_lock(&readLock);
     readCount--;
     if (readCount == 0) {
@@ -32,16 +32,16 @@ void AVLTree::endRead() {
     omp_unset_lock(&readLock);
 }
 
-void AVLTree::startWrite() {
+void AVLTreeCG::startWrite() {
     omp_set_lock(&writeLock);
 }
 
-void AVLTree::endWrite() {
+void AVLTreeCG::endWrite() {
     omp_unset_lock(&writeLock);
 }
 
 // A utility function to right rotate subtree rooted with y
-Node* AVLTree::rightRotate(Node* y) {
+Node* AVLTreeCG::rightRotate(Node* y) {
     Node* x = y->left;
     Node* T2 = x->right;
     x->right = y;
@@ -52,7 +52,7 @@ Node* AVLTree::rightRotate(Node* y) {
 }
 
 // A utility function to left rotate subtree rooted with x
-Node* AVLTree::leftRotate(Node* x) {
+Node* AVLTreeCG::leftRotate(Node* x) {
     Node* y = x->right;
     Node* T2 = y->left;
     y->left = x;
@@ -63,21 +63,21 @@ Node* AVLTree::leftRotate(Node* x) {
 }
 
 // A utility function to get height of tree
-int AVLTree::height(Node* N) const {
+int AVLTreeCG::height(Node* N) const {
     if (N == nullptr)
         return 0;
     return N->height;
 }
 
 // Get balance factor of node N
-int AVLTree::getBalance(Node* N) const {
+int AVLTreeCG::getBalance(Node* N) const {
     if (N == nullptr)
         return 0;
     return height(N->left) - height(N->right);
 }
 
 // Return the node with minimum key value in the given tree
-Node* AVLTree::minValueNode(Node* node) {
+Node* AVLTreeCG::minValueNode(Node* node) {
     Node* current = node;
     while (current->left != nullptr)
         current = current->left;
@@ -86,7 +86,7 @@ Node* AVLTree::minValueNode(Node* node) {
 
 // Recursive function to insert a key in the subtree rooted with node.
 // Returns the new root of the subtree.
-Node* AVLTree::insertHelper(Node* node, int key) {
+Node* AVLTreeCG::insertHelper(Node* node, int key) {
     // 1. Perform the normal BST insertion
     if (node == nullptr)
         return new Node(key);
@@ -117,7 +117,7 @@ Node* AVLTree::insertHelper(Node* node, int key) {
 }
 
 // Public insert function that wraps the helper
-Node* AVLTree::insert(Node* node, int key) {
+Node* AVLTreeCG::insert(Node* node, int key) {
     startWrite();
     Node* res = insertHelper(root, key);
     endWrite();
@@ -126,7 +126,7 @@ Node* AVLTree::insert(Node* node, int key) {
 
 // Recursive function to delete a node with given key from subtree with given root.
 // Returns root of the modified subtree.
-Node* AVLTree::deleteHelper(Node* node, int key) {
+Node* AVLTreeCG::deleteHelper(Node* node, int key) {
     // STEP 1: Perform standard BST delete
     if (node == nullptr)
         return node;
@@ -172,7 +172,7 @@ Node* AVLTree::deleteHelper(Node* node, int key) {
 }
 
 // Public delete function that wraps the helper
-Node* AVLTree::deleteNode(Node* node, int key) {
+Node* AVLTreeCG::deleteNode(Node* node, int key) {
     startWrite();
     Node* res = deleteHelper(root, key);
     endWrite();
@@ -180,7 +180,7 @@ Node* AVLTree::deleteNode(Node* node, int key) {
 }
 
 // Search for the given key in the subtree rooted with given node
-bool AVLTree::searchHelper(Node* node, int key) const {
+bool AVLTreeCG::searchHelper(Node* node, int key) const {
     if (node == nullptr)
         return false;
     if (key == node->key)
@@ -191,7 +191,7 @@ bool AVLTree::searchHelper(Node* node, int key) const {
 }
 
 // Public search function that wraps the helper
-bool AVLTree::search(Node* node, int key) {
+bool AVLTreeCG::search(Node* node, int key) {
     startRead();
     bool found = searchHelper(node, key);
     endRead();
@@ -200,7 +200,7 @@ bool AVLTree::search(Node* node, int key) {
 
 // A utility function to print preorder traversal of the tree.
 // The function also prints the height of every node.
-void AVLTree::preOrderHelper(Node* node) const {
+void AVLTreeCG::preOrderHelper(Node* node) const {
     if (node != nullptr) {
         std::cout << node->key << " ";
         preOrderHelper(node->left);
@@ -209,7 +209,7 @@ void AVLTree::preOrderHelper(Node* node) const {
 }
 
 // Preorder wrapper function
-void AVLTree::preOrder(Node* node) {
+void AVLTreeCG::preOrder(Node* node) {
     if (node != nullptr) {
         startWrite();
         std::cout << "preorder\n";

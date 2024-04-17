@@ -18,15 +18,20 @@ public:
     AVLTreeCG();
     ~AVLTreeCG();
 
-    bool insert(Node* node, int key);
-    bool deleteNode(Node* node, int key);
-    bool search(Node* node, int key);
-    void preOrder(Node* node);
+    bool insert(int key);
+    bool deleteNode(int key);
+    bool search(int key);
+    void preOrder();
 
 private:
     std::mutex writeLock;
     std::mutex readLock;
     int readCount;
+
+    void startWrite();
+    void endWrite();
+    void startRead();
+    void endRead();
     
     Node* rightRotate(Node* y);
     Node* leftRotate(Node* x);

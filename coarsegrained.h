@@ -2,19 +2,19 @@
 #include <vector>
 #include <mutex>
 
-class Node {
+class NodeCG {
 public:
     int key;
-    Node* left;
-    Node* right;
+    NodeCG* left;
+    NodeCG* right;
     int height;
 
-    Node(int key);
+    NodeCG(int key);
 };
 
 class AVLTreeCG {
 public:
-    Node* root;
+    NodeCG* root;
     AVLTreeCG();
     ~AVLTreeCG();
 
@@ -33,16 +33,16 @@ private:
     void startRead();
     void endRead();
     
-    Node* rightRotate(Node* y);
-    Node* leftRotate(Node* x);
-    int getBalance(Node* N) const;
-    int height(Node* N) const;
-    Node* minValueNode(Node* node);
+    NodeCG* rightRotate(NodeCG* y);
+    NodeCG* leftRotate(NodeCG* x);
+    int getBalance(NodeCG* N) const;
+    int height(NodeCG* N) const;
+    NodeCG* minValueNode(NodeCG* node);
 
-    Node* insertHelper(Node* node, int key, bool& err);
-    Node* deleteHelper(Node* node, int key, bool& err);
-    bool searchHelper(Node* node, int key) const;
-    void preOrderHelper(Node* node) const;
-    void freeTree(Node* node);
+    NodeCG* insertHelper(NodeCG* node, int key, bool& err);
+    NodeCG* deleteHelper(NodeCG* node, int key, bool& err);
+    bool searchHelper(NodeCG* node, int key) const;
+    void preOrderHelper(NodeCG* node) const;
+    void freeTree(NodeCG* node);
 };
 

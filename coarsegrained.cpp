@@ -1,7 +1,7 @@
 #include "coarsegrained.h"
 #include <mutex>
 
-Node::Node(int k) : key(k), left(nullptr), right(nullptr), height(1) {}
+NodeCG::NodeCG(int k) : key(k), left(nullptr), right(nullptr), height(1) {}
 
 AVLTreeCG::AVLTreeCG() : root(nullptr), readCount(0) {}
 
@@ -9,7 +9,7 @@ AVLTreeCG::~AVLTreeCG() {
     freeTree(root);
 }
 
-void AVLTreeCG::freeTree(Node *node) {
+void AVLTreeCG::freeTree(NodeCG* node) {
 	if (node == nullptr) return;
 	freeTree(root->left);
 	freeTree(root->right);
@@ -43,9 +43,9 @@ void AVLTreeCG::endWrite() {
 }
 
 // A utility function to right rotate subtree rooted with y
-Node* AVLTreeCG::rightRotate(Node* y) {
-    Node* x = y->left;
-    Node* T2 = x->right;
+NodeCG* AVLTreeCG::rightRotate(NodeCG* y) {
+    NodeCG* x = y->left;
+    NodeCG* T2 = x->right;
     x->right = y;
     y->left = T2;
     y->height = std::max(height(y->left), height(y->right)) + 1;
@@ -54,9 +54,9 @@ Node* AVLTreeCG::rightRotate(Node* y) {
 }
 
 // A utility function to left rotate subtree rooted with x
-Node* AVLTreeCG::leftRotate(Node* x) {
-    Node* y = x->right;
-    Node* T2 = y->left;
+NodeCG* AVLTreeCG::leftRotate(NodeCG* x) {
+    NodeCG* y = x->right;
+    NodeCG* T2 = y->left;
     y->left = x;
     x->right = T2;
     x->height = std::max(height(x->left), height(x->right)) + 1;
@@ -65,22 +65,22 @@ Node* AVLTreeCG::leftRotate(Node* x) {
 }
 
 // A utility function to get height of tree
-int AVLTreeCG::height(Node* N) const {
+int AVLTreeCG::height(NodeCG* N) const {
     if (N == nullptr)
         return 0;
     return N->height;
 }
 
 // Get balance factor of node N
-int AVLTreeCG::getBalance(Node* N) const {
+int AVLTreeCG::getBalance(NodeCG* N) const {
     if (N == nullptr)
         return 0;
     return height(N->left) - height(N->right);
 }
 
 // Return the node with minimum key value in the given tree
-Node* AVLTreeCG::minValueNode(Node* node) {
-    Node* current = node;
+NodeCG* AVLTreeCG::minValueNode(NodeCG* node) {
+    NodeCG* current = node;
     while (current->left != nullptr)
         current = current->left;
     return current;
@@ -88,10 +88,10 @@ Node* AVLTreeCG::minValueNode(Node* node) {
 
 // Recursive function to insert a key in the subtree rooted with node.
 // Returns the new root of the subtree.
-Node* AVLTreeCG::insertHelper(Node* node, int key, bool& err) {
+NodeCG* AVLTreeCG::insertHelper(NodeCG* node, int key, bool& err) {
     // 1. Perform the normal BST insertion
     if (node == nullptr)
-        return new Node(key);
+        return new NodeCG(key);
     if (key < node->key)
         node->left = insertHelper(node->left, key, err);
     else if (key > node->key)
@@ -131,7 +131,7 @@ bool AVLTreeCG::insert(int key) {
 
 // Recursive function to delete a node with given key from subtree with given root.
 // Returns root of the modified subtree.
-Node* AVLTreeCG::deleteHelper(Node* node, int key, bool& err) {
+NodeCG* AVLTreeCG::deleteHelper(NodeCG* node, int key, bool& err) {
     // STEP 1: Perform standard BST delete
     if (node == nullptr) {
         err = true;
@@ -143,7 +143,7 @@ Node* AVLTreeCG::deleteHelper(Node* node, int key, bool& err) {
         node->right = deleteHelper(node->right, key, err);
     else { // This is the node to be deleted
         if (node->left == nullptr || node->right == nullptr) {
-            Node* temp = node->left ? node->left : node->right;
+            NodeCG* temp = node->left ? node->left : node->right;
             if (temp == nullptr) {
                 temp = node;
                 node = nullptr;
@@ -152,7 +152,7 @@ Node* AVLTreeCG::deleteHelper(Node* node, int key, bool& err) {
             }
             delete temp;
         } else {
-            Node* temp = minValueNode(node->right);
+            NodeCG* temp = minValueNode(node->right);
             node->key = temp->key;
             node->right = deleteHelper(node->right, temp->key, err);
         }
@@ -184,13 +184,13 @@ Node* AVLTreeCG::deleteHelper(Node* node, int key, bool& err) {
 bool AVLTreeCG::deleteNode(int key) {
     bool err = false;
     startWrite();
-    Node* res = deleteHelper(root, key, err);
+    root = deleteHelper(root, key, err);
     endWrite();
     return !err;
 }
 
 // Search for the given key in the subtree rooted with given node
-bool AVLTreeCG::searchHelper(Node* node, int key) const {
+bool AVLTreeCG::searchHelper(NodeCG* node, int key) const {
     if (node == nullptr)
         return false;
     if (key == node->key)
@@ -210,7 +210,7 @@ bool AVLTreeCG::search(int key) {
 
 // A utility function to print preorder traversal of the tree.
 // The function also prints the height of every node.
-void AVLTreeCG::preOrderHelper(Node* node) const {
+void AVLTreeCG::preOrderHelper(NodeCG* node) const {
     if (node != nullptr) {
         std::cout << node->key << " ";
         preOrderHelper(node->left);

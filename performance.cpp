@@ -4,21 +4,21 @@ using namespace std;
 using namespace std::chrono;
 
 // Coarse-grained: IMPL=1, fine-grained: IMPL=2, lock-free: IMPL=3
-int IMPL = 1;
+int IMPL;
 
-AVLTreeCG *bst;
+AVLTreeCG *treeCG;
 
 /* UTILITY FUNCTIONS */
 void printImpl() {
-    if (IMPL == 1) printf("Coarse-Grained BST\n");
+    if (IMPL == 1) printf("Coarse-Grained AVL Tree\n");
 }
 
 void initTree() {
-    if (IMPL == 1) bst = new AVLTreeCG();
+    if (IMPL == 1) treeCG = new AVLTreeCG();
 }
 
 void deleteTree() {
-    if (IMPL == 1) delete bst;
+    if (IMPL == 1) delete treeCG;
 }
 
 std::vector<int> getBlockVector(int low, int high) {
@@ -37,17 +37,18 @@ std::vector<int> getShuffledVector(int low, int high) {
 }
 
 void flexInsert(int k) {
-    if (IMPL==1) bst->insert(k);
+    if (IMPL==1) treeCG->insert(k);
 }
 
 void flexDelete(int k) {
-    if (IMPL==1) bst->deleteNode(k);
+    if (IMPL==1) treeCG->deleteNode(k);
 }
 
 void flexSearch(int k) {
-    if (IMPL==1) bst->search(k);
+    if (IMPL==1) treeCG->search(k);
 }
 
+/* HELPER FUNCTIONS */
 void insertRange(int low, int high, std::vector<int> keyVector) {
     for (int i=low; i<high; i++) {
         flexInsert(keyVector[i]);
@@ -188,15 +189,14 @@ void testRandomSearch(int numThreads, int threadCapacity) {
 }
 
 /* MAIN FUNCTION */
-int main(int argc, char const *argv[])
-{
+int main(int argc, char const *argv[]) {
     std::vector<int> numThreads = {1, 4, 16, 64, 128};
-    std::vector<int> capacities = {100000, 10000};
-    std::vector<int> mode = {1, 2, 3};
-    for (int m: mode) {
+    std::vector<int> threadCapacities = {100000, 10000};
+    std::vector<int> impl = {1, 2, 3};
+    for (int m : impl) {
         IMPL = m;
         printImpl();
-        for (int capacity : capacities) {
+        for (int capacity : threadCapacities) {
             for (int threads : numThreads) {
                 testContiguousInsert(threads, capacity/threads);
                 testRandomInsert(threads, capacity/threads);

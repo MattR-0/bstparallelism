@@ -1,5 +1,5 @@
+#include <bits/stdc++.h>
 #include "coarsegrained.h"
-
 using namespace std;
 
 // Coarse-grained: IMPL=1, fine-grained: IMPL=2, lock-free: IMPL=3
@@ -16,10 +16,6 @@ void initTree() {
 
 void deleteTree() {
     if (IMPL==1) delete treeCG;
-}
-
-Node *getRoot() {
-    if (IMPL==1) return treeCG->root;
 }
 
 std::vector<int> getShuffledVector(int low, int high) {
@@ -44,9 +40,9 @@ bool flexSearch(int k) {
 }
 
 /* HELPER FUNCTIONS */
-void insertRange(int low, int high, std::std::vector<int> keyVector) {
+void insertRange(int low, int high) {
     for (int i=low; i<high; i++) {
-        flexInsert(keyVector[i]);
+        flexInsert(i);
     }
 }
 
@@ -76,10 +72,10 @@ void insertRangeDeleteSpread(int low, int high, int interval) {
     }
 }
 
-int checkHeightAndBalance(Node* node) {
+int checkHeightAndBalanceCG(NodeCG* node) {
     if (node==nullptr) return 0;
-    int leftHeight = checkHeightAndBalance(node->left);
-    int rightHeight = checkHeightAndBalance(node->right);
+    int leftHeight = checkHeightAndBalanceCG(node->left);
+    int rightHeight = checkHeightAndBalanceCG(node->right);
     if (node->height != 1+std::max(leftHeight, rightHeight))
         throw std::runtime_error("Node height is incorrect");
     int balance = leftHeight-rightHeight;
@@ -94,149 +90,196 @@ int checkHeightAndBalance(Node* node) {
     return node->height;
 }
 
+int checkHeightAndBalance() {
+    if (IMPL==1) {
+        return checkHeightAndBalanceCG(treeCG->root);
+    }
+}
+
 /* TEST FUNCTIONS */
 void testSequentialSearch() {
     initTree();
-    if (IMPL==1) treeCG->root=Node(20);
-    Node* treeRoot = getRoot();
-    treeRoot->left=Node(12);
-    treeRoot->right=Node(53);
-    treeRoot->left->left=Node(0);
-    treeRoot->right->left=Node(21);
-    treeRoot->left->right=Node(17);
-    treeRoot->right->right=Node(82);
-    treeRoot->right->right->left=Node(73);
-    treeRoot->left->right->left=Node(15);
-    treeRoot->left->left->right=Node(2);
+    if (IMPL==1) {
+        treeCG->root=new NodeCG(20);
+        NodeCG* treeRoot = treeCG->root;
+        treeRoot->left=new NodeCG(12);
+        treeRoot->right=new NodeCG(53);
+        treeRoot->left->left=new NodeCG(0);
+        treeRoot->right->left=new NodeCG(21);
+        treeRoot->left->right=new NodeCG(17);
+        treeRoot->right->right=new NodeCG(82);
+        treeRoot->right->right->left=new NodeCG(73);
+        treeRoot->left->right->left=new NodeCG(15);
+        treeRoot->left->left->right=new NodeCG(2);
+    }
     std::set<int> elems = {20,12,53,0,21,17,82,73,15,2};
     for (int i=0; i<100; i++) {
         bool found = flexSearch(i);
-        if (elems.contains(i) && !found)
-            throw std::runtime_error("Search failed, missing %d\n", i);
-        else if (!elems.contains(i) && found)
-            throw std::runtime_error("Search failed, incorrectly finding %d\n", i);
+        if (elems.find(i)!=elems.end() && !found) {
+            std::ostringstream oss;
+            oss << "Search failed, missing " << i << "\n";
+            throw std::runtime_error(oss.str());
+        } else if (elems.find(i)==elems.end() && found) {
+            std::ostringstream oss;
+            oss << "Search failed, incorrectly finding " << i << "\n";
+            throw std::runtime_error(oss.str());
+        } 
     }
     printf("Sequential search passed!\n");
 }
 
 void testSequentialInsert() {
     initTree();
-    std::vector<int> keyVector = getShuffledVector(0, 1000);
-    insertRange(0, 1000, keyVector);
+    insertRange(500, 900);
+    insertRange(0, 100);
+    insertRange(900, 1000);
+    insertRange(100, 500);
     for (int i=0; i<1000; i++) {
-        if (!flexSearch(i))
-            throw std::runtime_error("Sequential insert failed, missing %d\n", i);
+        if (!flexSearch(i)) {
+            std::ostringstream oss;
+            oss << "Sequential insert failed, missing " << i << "\n";
+            throw std::runtime_error(oss.str());
+        } 
     }
-    checkHeightAndBalance(getRoot());
+    checkHeightAndBalance();
     deleteTree();
     printf("Sequential insert passed!\n");
 }
 
 void testConcurrentInsert() {
     initTree();
-    std::vector<int> keyVector = getShuffledVector(0, NUM_THREADS*1000);
-    std::std::vector<thread> threads;
+    std::vector<std::thread> threads;
     for (int i=0; i<NUM_THREADS; i++) {
         threads.push_back(thread(insertRange, i*100, (i+1)*100));
     }
     for (int i=0; i<NUM_THREADS; i++) {
         threads[i].join();
     }
-    for (int i=0; i<NUM_THREADS*1000; i++) {
-        if (!flexSearch(i))
-            throw std::runtime_error("Concurrent insert failed, missing %d\n", i);
+    for (int i=0; i<NUM_THREADS*100; i++) {
+        if (!flexSearch(i)) {
+            std::ostringstream oss;
+            oss << "Concurrent insert failed, missing " << i << "\n";
+            throw std::runtime_error(oss.str());
+        } 
     }
-    checkHeightAndBalance(getRoot());
+    checkHeightAndBalance();
     deleteTree();
     printf("Concurrent insert passed!\n");
 }
 
 void testSequentialDelete() {
     initTree();
-    insertRangeRandom(0, THREAD_SIZE);
+    insertRange(0, THREAD_SIZE);
     deleteRangeContiguous(THREAD_SIZE/2, THREAD_SIZE);
     for (int i=0; i<THREAD_SIZE; i++) {
-        bool found = flexSearch(i)
-        if (i<THREAD_SIZE/2 && !found)
-            throw std::runtime_error("Sequential delete failed, missing %d\n", i);
-        else if (i>=THREAD_SIZE/2 && found)
-            throw std::runtime_error("Sequential delete failed, incorrectly finding %d\n", i);
+        bool found = flexSearch(i);
+        if (i<THREAD_SIZE/2 && !found) {
+            std::ostringstream oss;
+            oss << "Sequential delete failed, missing " << i << "\n";
+            throw std::runtime_error(oss.str());
+        } 
+        else if (i>=THREAD_SIZE/2 && found) {
+            std::ostringstream oss;
+            oss << "Sequential delete failed, incorrectly finding " << i << "\n";
+            throw std::runtime_error(oss.str());
+        } 
     }
-    checkHeightAndBalance(getRoot());
+    checkHeightAndBalance();
     deleteTree();
 
     initTree();
-    insertRangeRandom(0, THREAD_SIZE);
+    insertRange(0, THREAD_SIZE);
     deleteRangeSpread(0, THREAD_SIZE);
     for (int i=0; i<THREAD_SIZE; i++) {
         bool found = flexSearch(i);
-        if (i%2==1 && !found)
-            throw std::runtime_error("Sequential delete failed, missing %d\n", i);
-        else if (i%2==0 && found)
-            throw std::runtime_error("Sequential delete failed, incorrectly finding %d\n", i);
+        if (i%2==1 && !found) {
+            std::ostringstream oss;
+            oss << "Sequential delete failed, missing " << i << "\n";
+            throw std::runtime_error(oss.str());
+        } 
+        else if (i%2==0 && found) {
+            std::ostringstream oss;
+            oss << "Sequential delete failed, incorrectly finding " << i << "\n";
+            throw std::runtime_error(oss.str());
+        } 
     }
-    checkHeightAndBalance(getRoot());
+    checkHeightAndBalance();
     deleteTree();
     printf("Sequential delete passed!\n");
 }
 
 void testConcurrentDelete() {
 	initTree();
-	insertRangeRandom(0, NUM_THREADS * THREAD_SIZE);
-	std::vector<thread> threads;
+	insertRange(0, NUM_THREADS * THREAD_SIZE);
+	std::vector<std::thread> threads;
 	for (int i = 0; i < NUM_THREADS; i++) {
-		threads.push_back(thread(deleteRange, i*THREAD_SIZE+THREAD_SIZE/4, (i+1)*THREAD_SIZE));
+		threads.push_back(thread(deleteRangeContiguous, i*THREAD_SIZE+THREAD_SIZE/4, (i+1)*THREAD_SIZE));
 	}
 	for (int i = 0; i<NUM_THREADS; i++) {
 		threads[i].join();
 	}
 	for (int i = 0; i<NUM_THREADS * THREAD_SIZE; i++) {
         bool found = flexSearch(i);
-		if (i%THREAD_SIZE<THREAD_SIZE/4 && !found)
-            throw std::runtime_error("Concurrent delete failed, missing %d\n", i);
-		else if (i%THREAD_SIZE>=THREAD_SIZE/4 && found)
-            throw std::runtime_error("Concurrent delete failed, incorrectly finding %d\n", i);
+		if (i%THREAD_SIZE<THREAD_SIZE/4 && !found) {
+            std::ostringstream oss;
+            oss << "Concurrent delete failed, missing " << i << "\n";
+            throw std::runtime_error(oss.str());
+        } 
+		else if (i%THREAD_SIZE>=THREAD_SIZE/4 && found) {
+            std::ostringstream oss;
+            oss << "Concurrent delete failed, incorrectly finding " << i << "\n";
+            throw std::runtime_error(oss.str());
+        } 
 	}
-    checkHeightAndBalance(getRoot());
+    checkHeightAndBalance();
 	deleteTree();
 	printf("Concurrent deletion passed!\n");
 }
 
 void testInsertDeleteContiguous() {
 	initTree();
-	std::vector<thread> threads;
+	std::vector<std::thread> threads;
 	for (int i=0; i<NUM_THREADS; i++) {
-		threads.push_back(thread(insertRangeDeleteContiguous, i*THREAD_SIZE, (i+1)*THREAD_SIZE));
+		threads.push_back(thread(insertRangeDeleteContiguous, i*THREAD_SIZE, (i+1)*THREAD_SIZE, (THREAD_SIZE+1)/2));
 	}
 	for (int i=0; i<NUM_THREADS; i++) {
 		threads[i].join();
 	}
 	for (int i=0; i<NUM_THREADS*THREAD_SIZE; i++) {
-		if (flexSearch(i))
-            throw std::runtime_error("Insert/delete contiguous mix failed, incorrectly finding %d\n", i);
+		if (flexSearch(i)) {
+            std::ostringstream oss;
+            oss << "Insert/delete contiguous mix failed, incorrectly finding " << i << "\n";
+            throw std::runtime_error(oss.str());
+        }
 	}
-    checkHeightAndBalance(getRoot());
+    checkHeightAndBalance();
 	deleteTree();
 	printf("insert delete test passed!\n");
 }
 
 void testInsertDeleteSpread() {
 	initTree();
-	std::vector<thread> threads;
+	std::vector<std::thread> threads;
 	for (int i=0; i<NUM_THREADS; i++) {
-		threads.push_back(thread(insertRangeDeleteSpread, i*THREAD_SIZE, (i+1)*THREAD_SIZE));
+		threads.push_back(thread(insertRangeDeleteSpread, i*THREAD_SIZE, (i+1)*THREAD_SIZE, (THREAD_SIZE+1)/2));
 	}
 	for (int i=0; i<NUM_THREADS; i++) {
 		threads[i].join();
 	}
 	for (int i=0; i<NUM_THREADS*THREAD_SIZE; i++) {
         bool found = flexSearch(i);
-        if (i%2==1 && !found)
-            throw std::runtime_error("Insert/delete spread mix failed, missing %d\n", i);
-        else if (i%2==0 && found)
-            throw std::runtime_error("Insert/delete spread mix failed, incorrectly finding %d\n", i);
+        if (i%2==1 && !found) {
+            std::ostringstream oss;
+            oss << "Insert/delete spread mix failed, missing " << i << "\n";
+            throw std::runtime_error(oss.str());
+        }
+        else if (i%2==0 && found) {
+            std::ostringstream oss;
+            oss << "Insert/delete spread mix failed, incorrectly finding " << i << "\n";
+            throw std::runtime_error(oss.str());
+        }
     }
-    checkHeightAndBalance(getRoot());
+    checkHeightAndBalance();
 	deleteTree();
 	printf("insert delete test passed!\n");
 }

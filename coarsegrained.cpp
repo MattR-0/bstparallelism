@@ -11,8 +11,8 @@ AVLTreeCG::~AVLTreeCG() {
 
 void AVLTreeCG::freeTree(NodeCG* node) {
 	if (node == nullptr) return;
-	freeTree(root->left);
-	freeTree(root->right);
+	freeTree(node->left);
+	freeTree(node->right);
 	delete node;
 }
 

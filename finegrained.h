@@ -33,7 +33,7 @@ private:
     NodeFG* minValueNode(NodeFG* node);
 
     void insertHelper(NodeFG* node, int key, bool& err);
-    NodeFG* deleteHelper(NodeFG* node, int key, bool& err);
+    void deleteHelper(NodeFG* node, int key, bool& err);
     bool searchHelper(NodeFG* node, int key) const;
     void preOrderHelper(NodeFG* node) const;
     void freeTree(NodeFG* node);

@@ -56,8 +56,12 @@ int AVLTreeFG::getBalance(NodeFG* N) const {
 // Return the node with minimum key value in the given tree
 NodeFG* AVLTreeFG::minValueNode(NodeFG* node) {
     NodeFG* current = node;
-    while (current->left != nullptr)
+    while (current->left != nullptr) {
+        current->left->nodeLock.lock();
+        current->nodeLock.unlock();
         current = current->left;
+    }
+    // current node (the leaf node to be deleted) acquires a lock at this point
     return current;
 }
 
@@ -130,61 +134,83 @@ bool AVLTreeFG::insert(int key) {
 }
 
 // Recursive function to delete a node with given key from subtree with given root.
-// Returns root of the modified subtree.
-NodeFG* AVLTreeFG::deleteHelper(NodeFG* node, int key, bool& err) {
+void AVLTreeFG::deleteHelper(NodeFG* node, int key, bool& err) {
     // STEP 1: Perform standard BST delete
     if (node == nullptr) {
         err = true;
-        return node;
+        root->nodeLock.unlock();
+        return;
     }
-    if (key < node->key)
-        node->left = deleteHelper(node->left, key, err);
-    else if (key > node->key)
-        node->right = deleteHelper(node->right, key, err);
+    if (key < node->key) {
+        // Hand-over-hand locking until the node to be deleted is found
+        node->left->nodeLock.lock();
+        node->nodeLock.unlock();
+        deleteHelper(node->left, key, err);
+    }
+    else if (key > node->key) {
+        node->right->nodeLock.lock();
+        node->nodeLock.unlock();
+        deleteHelper(node->right, key, err);
+    }
     else { // This is the node to be deleted
         if (node->left == nullptr || node->right == nullptr) {
             NodeFG* temp = node->left ? node->left : node->right;
-            if (temp == nullptr) {
+            if (temp == nullptr) { // Leaf node
                 delete node;
             } else {
+                // Height will be updated below while rebalancing
+                temp->nodeLock.lock();
                 node->key = temp->key;  
                 node->left = temp->left; 
                 node->right = temp->right;  
+                temp->nodeLock.unlock();
                 delete temp;
+                node->nodeLock.unlock();
             }
         } else {
+            node->right->nodeLock.lock();
             NodeFG* temp = minValueNode(node->right);
-            node->key = temp->key;
-            node->right = deleteHelper(node->right, temp->key, err);
+            node->key = temp->key; // both nodes should have lock here
+            temp->nodeLock.unlock();
+            delete temp;
+            node->nodeLock.unlock(); // deletion complete
+
+            // Recursive call is not necessary here (?) 
+            // Temp is a leaf so "delete" might be enough. 
+            // If insertion commits correctly (i.e., during deletion, insert to 
+            // temp position happens then temp must witness new inserted value 
+            // not the old one)
+            // deleteHelper(node->right, temp->key, err);
         }
     }
     if (node == nullptr) {
         err = true;
-        return node;
+        return;
     }
     // Step 2: update height of the current node
     node->height = 1 + std::max(height(node->left), height(node->right));
     // Step 3: check whether this node became unbalanced
     int balance = getBalance(node);
     if (balance > 1 && getBalance(node->left) >= 0)
-        return rightRotate(node);
+        node = rightRotate(node);
     if (balance > 1 && getBalance(node->left) < 0) {
         node->left = leftRotate(node->left);
-        return rightRotate(node);
+        node = rightRotate(node);
     }
     if (balance < -1 && getBalance(node->right) <= 0)
-        return leftRotate(node);
+        node = leftRotate(node);
     if (balance < -1 && getBalance(node->right) > 0) {
         node->right = rightRotate(node->right);
-        return leftRotate(node);
+        node = leftRotate(node);
     }
-    return node;
+    return;
 }
 
 // Public delete function that wraps the helper
 bool AVLTreeFG::deleteNode(int key) {
     bool err = false;
-    root = deleteHelper(root, key, err);
+    root->nodeLock.lock();
+    deleteHelper(root, key, err);
     return !err;
 }
 

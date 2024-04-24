@@ -1,9 +1,10 @@
 #include "finegrained.h"
+#include <iostream>
 #include <mutex>
 
-NodeFG::NodeFG(int k) : key(k), left(nullptr), right(nullptr), height(1) {}
+NodeFG::NodeFG(int k) : key(k), left(nullptr), right(nullptr), height(1), nodeLock() {}
 
-AVLTreeFG::AVLTreeFG() : root(nullptr), readCount(0) {}
+AVLTreeFG::AVLTreeFG() : root(nullptr) {}
 
 AVLTreeFG::~AVLTreeFG() {
     freeTree(root);
@@ -60,19 +61,39 @@ NodeFG* AVLTreeFG::minValueNode(NodeFG* node) {
     return current;
 }
 
-// Recursive function to insert a key in the subtree rooted with node.
-// Returns the new root of the subtree.
-NodeFG* AVLTreeFG::insertHelper(NodeFG* node, int key, bool& err) {
-    // 1. Perform the normal BST insertion
+void AVLTreeFG::insertHelper(NodeFG* node, int key, bool& err) {
     if (node == nullptr)
-        return new NodeFG(key);
-    if (key < node->key)
-        node->left = insertHelper(node->left, key, err);
-    else if (key > node->key)
-        node->right = insertHelper(node->right, key, err);
+        throw "Invalid insertion of node\n";
+    if (key < node->key) {
+        if (node->left == NULL) {
+            // Critical section: the parent is protected, so only one thread can update the child at a time
+            node->left = new NodeFG(key); 
+            // Release control once child is inserted
+            node->nodeLock.unlock(); 
+            // Check for balance after insertion
+        }
+        else {
+            // Hand-over-hand pattern:
+            // The child acquires the lock first, then the parent releases the lock
+            node->left->nodeLock.lock();
+            node->nodeLock.unlock();
+            insertHelper(node->left, key, err);
+        }
+    }
+    else if (key > node->key) {
+        if (node->right == NULL) {
+            node->right = new NodeFG(key);
+            node->nodeLock.unlock();
+        }
+        else {
+            node->right->nodeLock.lock();
+            node->nodeLock.unlock();
+            insertHelper(node->right, key, err);
+        }
+    }
     else {
         err = true;
-        return node;
+        return;
     }
     // 2. Update height of this ancestor node
     node->height = 1 + std::max(height(node->left), height(node->right));
@@ -80,24 +101,31 @@ NodeFG* AVLTreeFG::insertHelper(NodeFG* node, int key, bool& err) {
     int balance = getBalance(node);
     // If this node becomes unbalanced, then there are 4 cases
     if (balance > 1 && key < node->left->key)
-        return rightRotate(node);
-    if (balance < -1 && key > node->right->key)
-        return leftRotate(node);
-    if (balance > 1 && key > node->left->key) {
+        node = rightRotate(node);
+    else if (balance < -1 && key > node->right->key)
+        node =  leftRotate(node);
+    else if (balance > 1 && key > node->left->key) {
         node->left = leftRotate(node->left);
-        return rightRotate(node);
+        node = rightRotate(node);
     }
-    if (balance < -1 && key < node->right->key) {
+    else if (balance < -1 && key < node->right->key) {
         node->right = rightRotate(node->right);
-        return leftRotate(node);
+        node = leftRotate(node);
     }
-    return node;
+    return;
 }
 
 // Public insert function that wraps the helper
 bool AVLTreeFG::insert(int key) {
     bool err = false;
-    root = insertHelper(root, key, err);
+    rootLock.lock();
+    if (root == nullptr) {
+        root = new NodeFG(key);
+        return !err;
+    }
+    rootLock.unlock();
+    root->nodeLock.lock();
+    insertHelper(root, key, err);
     return !err;
 }
 
@@ -117,12 +145,13 @@ NodeFG* AVLTreeFG::deleteHelper(NodeFG* node, int key, bool& err) {
         if (node->left == nullptr || node->right == nullptr) {
             NodeFG* temp = node->left ? node->left : node->right;
             if (temp == nullptr) {
-                temp = node;
-                node = nullptr;
+                delete node;
             } else {
-                *node = *temp;
+                node->key = temp->key;  
+                node->left = temp->left; 
+                node->right = temp->right;  
+                delete temp;
             }
-            delete temp;
         } else {
             NodeFG* temp = minValueNode(node->right);
             node->key = temp->key;
@@ -191,4 +220,8 @@ void AVLTreeFG::preOrder() {
     std::cout << "preorder\n";
     preOrderHelper(root);
     std::cout << "\n";
+}
+
+int main() {
+    return 0;
 }

@@ -1,5 +1,4 @@
 #include <iostream>
-#include <vector>
 #include <mutex>
 
 class NodeFG {
@@ -8,7 +7,7 @@ public:
     NodeFG* left;
     NodeFG* right;
     int height;
-    std::mutex lock;
+    std::mutex nodeLock;
 
     NodeFG(int key);
 };
@@ -22,20 +21,20 @@ public:
     bool insert(int key);
     bool deleteNode(int key);
     bool search(int key);
+    void preOrder();
 
 private:
-    std::mutex lock;
+    std::mutex rootLock;
 
-    Node* rightRotate(Node* y);
-    Node* leftRotate(Node* x);
-    int getBalance(Node* N) const;
-    int height(Node* N) const;
-    Node* minValueNode(Node* node);
+    NodeFG* rightRotate(NodeFG* y);
+    NodeFG* leftRotate(NodeFG* x);
+    int getBalance(NodeFG* N) const;
+    int height(NodeFG* N) const;
+    NodeFG* minValueNode(NodeFG* node);
 
-    Node* insertHelper(Node* node, int key, bool& err);
-    Node* deleteHelper(Node* node, int key, bool& err);
-    bool searchHelper(Node* node, int key) const;
-    void preOrderHelper(Node* node) const;
-    void freeTree(Node* node);
-};
-
+    void insertHelper(NodeFG* node, int key, bool& err);
+    NodeFG* deleteHelper(NodeFG* node, int key, bool& err);
+    bool searchHelper(NodeFG* node, int key) const;
+    void preOrderHelper(NodeFG* node) const;
+    void freeTree(NodeFG* node);
+};  

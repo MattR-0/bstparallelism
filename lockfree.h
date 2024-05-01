@@ -5,12 +5,12 @@
 class NodeLF {
 public:
     int key;
-    volatile int value;
-    volatile NodeLF* parent;
-    volatile NodeLF* left;
-    volatile NodeLF* right;
-    volatile int height;
-    volatile long version; // Bottom 3 bits: unlink, growing change, shrinking change
+    std::atomic<int> value;
+    std::atomic<NodeLF*> parent;
+    std::atomic<NodeLF*> left;
+    std::atomic<NodeLF*> right;
+    std::atomic<int> height;
+    std::atomic<long> version; // Bottom 3 bits: unlink, growing change, shrinking change
 
     NodeLF(int key);
     NodeLF* child(int direction);

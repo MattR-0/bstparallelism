@@ -1,13 +1,13 @@
 #include "lockfree.h"
 
-static long Unlinked = 0x1L;
-static long Growing = 0x2L;
-static long GrowCountIncr = 1L << 3;
-static long GrowCountMask = 0xffL << 3;
-static long Shrinking = 0x4L;
-static long ShrinkCountIncr = 1L << 11;
-static long IgnoreGrow = ~(Growing | GrowCountMask);
-static Object Retry = new Object();
+#define UNLINKED 0x1L
+#define GROWING 0x2L
+#define GROWCOUNTINCR 1L << 3
+#define GROWCOUNTMASK 0xffL << 3
+#define SHRINKING 0x4L
+#define SHRINKCOUNTINCR 1L << 11
+#define IGNOREGROW ~(GROWING | GROWCOUNTMASK)
+#define SPINCOUNT 100
 
 NodeLF* NodeLF::child(int direction) {
     if (direction==1)
@@ -16,89 +16,80 @@ NodeLF* NodeLF::child(int direction) {
         return left;
 }
 
-int get(int k) {
-    return (int)attemptGet(k, rootHolder, 1, 0);
+bool AVLTreeLF::search(int k) {
+    return (bool)attemptSearch(k, rootHolder, 1, 0);
 }
 
-Object AVLTreeLF::attemptGet(int k, NodeLF node, int dir, long nodeV) {
+int AVLTreeLF::attemptSearch(int k, NodeLF node, int dir, long nodeV) {
     while (true) {
-        NodeLF child = node.child(dir);
-        if (((node.version^nodeV) & IgnoreGrow) != 0)
-            return Retry;
-        if (child == nullptr)
-            return nullptr;
-        int nextD = k.compareTo(child.key);
-        if (nextD == 0)
-            return child.value;
-        long chV = child.version;
-        if ((chV & Shrinking) != 0) {
+        NodeLF* child = node->child(dir);
+        if (((node->version.load()^nodeV)&IGNOREGROW) != 0)
+            return -1;
+        if (child==nullptr)
+            return 0;
+        int nextD = (k<child->key) ? -1 : (k>child->key) ? 1 : 0;
+        if (nextD==0)
+            return 1;
+        long chV = child->version.load();
+        if ((chV&SHRINKING) != 0) {
             waitUntilNotChanging(child);
-        } else if (chV != Unlinked && child == node.child(dir)) {
-            if (((node.version^nodeV) & IgnoreGrow) != 0)
-                return Retry;
-            Object p = attemptGet(k, child, nextD, chV);
-            if (p != Retry)
+        } else if (chV!=UNLINKED && child==node->child(dir)) {
+            if (((node->version.load()^nodeV)&IGNOREGROW) != 0)
+                return -1;
+            void* p = attemptSearch(k, child, nextD, chV);
+            if (p!=-1)
                 return p;
         }
     }
 }
 
-int AVLTreeLF::put(int k, int v) {
-    return (int)attemptPut(k, v, rootHolder, 1, 0);
+bool AVLTreeLF::insert(int k, int v) {
+    return (bool)attemptPut(k, v, rootHolder, 1, 0);
 }
 
-void* AVLTreeLF::attemptPut(int k, int v, NodeLF* node, int dir, long nodeV) {
-    void* p = reinterpret_cast<void*>(-1); // Retry represented as -1
+int AVLTreeLF::attemptInsert(int k, int v, NodeLF* node, int dir, long nodeV) {
+    int p = -1; // Retry represented as -1
     do {
         NodeLF* child = node->child(dir);
-        if (((node->version.load() ^ nodeV) & IgnoreGrow) != 0)
-            return reinterpret_cast<void*>(-1); // Retry
-        if (child == nullptr) {
-            p = attemptInsert(k, v, node, dir, nodeV);
+        if (((node->version.load()^nodeV)&IGNOREGROW) != 0)
+            return -1; // Retry
+        if (child==nullptr) {
+            p = attemptAdd(k, v, node, dir, nodeV);
         } else {
-            int nextD = (k < child->key) ? -1 : (k > child->key) ? 1 : 0;
-            if (nextD == 0) {
-                p = attemptUpdate(child, v);
+            int nextD = (k<child->key) ? -1 : (k>child->key) ? 1 : 0;
+            if (nextD==0) {
+                return 0; // Failure, key already in tree
             } else {
                 long chV = child->version.load();
-                if ((chV & Shrinking) != 0) {
+                if ((chV&SHRINKING) != 0) {
                     waitUntilNotChanging(child);
-                } else if (chV != Unlinked && child == node->child(dir)) {
-                    if (((node->version.load() ^ nodeV) & IgnoreGrow) != 0)
-                        return reinterpret_cast<void*>(-1); // Retry
-                    p = attemptPut(k, v, child, nextD, chV);
+                } else if (chV!=UNLINKED && child==node->child(dir)) {
+                    if (((node->version.load()^nodeV)&IGNOREGROW) != 0)
+                        return -1;
+                    p = attemptInsert(k, v, child, nextD, chV);
                 }
             }
         }
-    } while (p == reinterpret_cast<void*>(-1));
+    } while (p == -1);
     return p;
 }
 
-std::atomic<void*> AVLTreeLF::attemptInsert(int k, int v, NodeLF* node, int dir, long nodeV) {
+int AVLTreeLF::attemptAdd(int k, int v, NodeLF* node, int dir, long nodeV) {
     NodeLF* expectedChild = nullptr;
-    if ((node->version.load() ^ nodeV) & IgnoreGrow || node->child(dir) != nullptr) {
-        return reinterpret_cast<void*>(-1);
-    }
-
-    NodeLF* newNode = new NodeLF(k, v, node, 0, nullptr, nullptr);
-    if (node->child(dir) == nullptr) {
-        std::atomic<NodeLF*>& child = (dir == 1) ? node->right : node->left;
-        if (child.compare_exchange_strong(expectedChild, newNode)) {
-            // Fix height and rebalance after successful insertion
+    if ((node->version.load()^nodeV)&IGNOREGROW || node->child(dir)!=nullptr)
+        return -1;
+    if (node->child(dir)==nullptr) {
+        NodeLF* newNode = new NodeLF(k, v, node, 0, nullptr, nullptr);
+        std::atomic<NodeLF*>& child = (dir==1) ? node->right : node->left;
+        if (child.compare_exchange_strong(expectedChild, newNode)) { // Successful insertion
             fixHeightAndRebalance(node);
-            return nullptr;  // Indicate success with null
+            return 1;
         } else {
-            delete newNode; // Cleanup if CAS fails
-            return reinterpret_cast<void*>(-1);
+            delete newNode;
+            return -1;
         }
     }
-    return reinterpret_cast<void*>(-1);
-}
-
-std::atomic<void*> AVLTreeLF::attemptUpdate(NodeLF* node, int v) {
-    if (node->version.load() == Unlinked) return reinterpret_cast<void*>(-1);
-    int prevValue = node->value.exchange(v);
-    return reinterpret_cast<void*>(prevValue);
+    return -1;
 }
 
 
@@ -165,18 +156,17 @@ void AVLTreeLF::rotateRight(Node n) {
     n.version += ShrinkCountIncr;
 }
 
-static int SpinCount = 100;
 
 void AVLTreeLF::waitUntilNotChanging(Node n) {
     long v = n.version;
     if ((v & (Growing | Shrinking)) != 0) {
         int i = 0;
-        while (n.version == v && i < SpinCount) ++i;
-        if (i == SpinCount) synchronized (n) { };
+        while (n.version == v && i < SPINCOUNT) ++i;
+        if (i == SPINCOUNT) synchronized (n) { };
     }
 }
 
-NodeLF::NodeLF(int k) : key(k), parent(nullptr), left(nullptr), right(nullptr), height(1), version(1) {}
+NodeLF::NodeLF(int k) : key(k), value(0), parent(nullptr), left(nullptr), right(nullptr), height(1), version(0) {}
 
 AVLTreeLF::AVLTreeLF() : root(nullptr) {}
 

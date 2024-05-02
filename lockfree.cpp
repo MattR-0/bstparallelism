@@ -1,126 +1,100 @@
 #include <lockfree.h>
 
-struct NodeT {
-    int key;
-    NodeT* left;
-    NodeT* right;
-    OperationT* op;
-    int localHeight;
-    int lh;
-    int rh;
-    bool deleted;
-    bool removed;
-};
-
-union OperationT {
-    InsertOpT insertOp;
-    RotateOpT rotateOp;
-};
-
-struct InsertOpT {
-    bool isLeft;
-    bool isUpdate = false;
-    NodeT* expected;
-    NodeT* newN;
-};
-
-struct RotateOpT {
-    volatile int state = UNDECIDED;
-    NodeT* parent;
-    NodeT* node;
-    NodeT* child;
-    OperationT* pOp;
-    OperationT* nOp;
-    OperationT* cOp;
-    bool rightR;
-    bool dir;
-};
+#define FLAG_MASK 3UL
+#define NULL_MASK 1UL
 
 // Operation marking status
-#define NONE 0
-#define MARK 1
-#define ROTATE 2
-#define INSERT 3
+enum opFlag {
+    NONE, MARK, ROTATE, INSERT
+};
 
-// Input: int k, NodeT* root
-// Output: true, if the key is found in the set otherwise false
-bool search(int k, NodeT* node) {
+Operation* AVLTreeLF::flag(Operation* op, int status) {
+    (Operation*) ((uintptr_t)op | status);
+}
+
+Operation* AVLTreeLF::getFlag(Operation* op) {
+    (Operation*) ((uintptr_t)op & FLAG_MASK);
+}
+
+Operation* AVLTreeLF::unflag(Operation* op) {
+    return (Operation*)(((uintptr_t)op >> 2) << 2);
+}
+
+bool AVLTreeLF::search(int k, NodeLF* node) {
     bool result = false;
     while (node!=nullptr) {
-        int nodeKey = node->key;
-        if (k<nodeKey)
+        if (k<node->key)
             node = node->left;
-        else if (k>nodeKey)
+        else if (k>node->key)
             node = node->right;
         else {
             result = true;
             break;
         }
     }
-    if (result && node->deleted) {
-        if (getFlag(node->op)==INSERT) {
-            if (node->op->insertOp.newN->key==k) {
-                return true;
-            }
-        }
-        return false;
-    }
     return result;
 }
 
-int seek(int key, NodeT** parent, OperationT** parentOp, NodeT** node, OperationT** nodeOp, NodeT* auxRoot, NodeT* root) {
-    int result = -1;
+int AVLTreeLF::seek(int key, NodeLF** parent, Operation** parentOp, NodeLF** node, Operation** nodeOp, NodeLF* auxRoot, NodeLF* root) {
+    NodeLF* next;
+    int result;
+    bool retry = false;
     while (true) {
+        result = -1;
         *node = auxRoot;
         *nodeOp = (*node)->op;
         if (getFlag(*nodeOp)!=NONE && auxRoot==root) {
-            bstHelpInsert((OperationT*)unflag(*nodeOp), *node);
+            bstHelpInsert(unflag(*nodeOp), *node);
             continue;
         }
-        *node = (*node)->right;
-        while (*node!=nullptr) {
-            *parent = *node;
+        next = (*node)->right;
+        while (next!=nullptr) {
+            *parent = *node
             *parentOp = *nodeOp;
+            *node = next;
+            *nodeOp = (*node)->op;
+            if (getFlag(nodeOp) != NONE) {
+                help(*parent, *parentOp, *node, *nodeOp);
+                retry = true;
+                break;
+            }
             int nodeKey = (*node)->key;
             if (key<nodeKey) {
-                *node = (*node)->left;
+                next = (*node)->left;
                 result = -1;
             } else if (key>nodeKey) {
-                *node = (*node)->right;
+                next = (*node)->right;
                 result = 1;
             } else
                 return 0;
         }
-        if (getFlag(*nodeOp) != NONE)
-            help(*parent, *parentOp, *node, *nodeOp);
-        else
+        if (!retry)
             return result;
+        else
+            retry = false;
     }
+    return result;
 }
 
-bool insert(int key, NodeT* root) {
-    NodeT* parent;
-    NodeT* current;
-    NodeT* newNode = nullptr;
-    OperationT* parentOp;
-    OperationT* nodeOp;
-    OperationT* casOp;
+bool AVLTreeLF::insert(int key, NodeLF* root) {
+    NodeLF* parent;
+    NodeLF* current;
+    NodeLF* newNode = nullptr;
+    Operation* parentOp;
+    Operation* currentOp;
+    Operation* casOp;
     int result = 0;
 
     while (true) {
-        result = seek(key, &parent, &parentOp, &current, &nodeOp, root, root);
-        if (result==0 && !current->deleted)
+        result = seek(key, &parent, &parentOp, &current, &currentOp, root, root);
+        if (result==0)
             return false;
         if (newNode==nullptr)
-            newNode = new NodeT{key, nullptr, nullptr, nodeOp, 1, 0, 0, false, false};
-        NodeT* old = (result==-1) ? current->left : current->right;
-        casOp = new OperationT{new InsertOpT, new RotateOpT};
-        if (result==0 && current->deleted)
-            casOp->insertOp.isUpdate = true;
-        casOp->insertOp.isLeft = (result==-1);
-        casOp->insertOp.expected = old;
-        casOp->insertOp.newNode = newNode;
-        if (current->op.compare_exchange_strong(nodeOp, FLAG(insertOp, INSERT)) {
+            newNode = new NodeLF(key);
+        bool isLeft = (result==-1);
+        NodeLF* oldNode = isLeft ? current->left : current->right;
+        casOp = new InsertOp(isLeft, oldNode, newNode);
+        if (__sync_bool_compare_and_swap(current->op, currentOp, flag(casOp, INSERT)) {
             helpInsert(casOp, current);
             return true;
         }

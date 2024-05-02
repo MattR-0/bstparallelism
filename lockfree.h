@@ -5,7 +5,6 @@
 class NodeLF {
 public:
     int key;
-    std::atomic<int> value;
     std::atomic<NodeLF*> parent;
     std::atomic<NodeLF*> left;
     std::atomic<NodeLF*> right;

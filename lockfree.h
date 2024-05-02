@@ -4,21 +4,39 @@
 
 class NodeLF {
 public:
-    int key;
-    volatile int value;
-    volatile NodeLF* parent;
+    volatile int key;
     volatile NodeLF* left;
     volatile NodeLF* right;
-    volatile int height;
-    volatile long version; // Bottom 3 bits: unlink, growing change, shrinking change
 
     NodeLF(int key);
-    NodeLF* child(int direction);
 };
+
+class InsertOp : public Operation {
+public:
+    bool isLeft;
+    bool isUpdate = false;
+    NodeLF* expectedNode;
+    NodeLF* newNode;
+
+    InsertOp(bool isLeft, bool isUpdate, NodeLF* expected, NodeLF* new);
+};
+
+class RotateOp : public Operation {
+public:
+    volatile int state = 0;
+    NodeLF* node;
+    Operation* nodeOp;
+    bool rightR;
+    bool dir;
+    int oldKey;
+    int newKey;
+
+    RotateOp(NodeLF* node, Operation* nodeOp, int oldKey, int newKey);
+}
 
 class AVLTreeLF {
 public:
-    NodeLF* rootHolder; // empty node w/ root as right child
+    NodeLF* root;
     AVLTreeLF();
     ~AVLTreeLF();
 
@@ -27,8 +45,6 @@ public:
     bool search(int key);
 
 private:
-    std::atomic<int> x;
-    
     NodeLF* rightRotate(NodeLF* y);
     NodeLF* leftRotate(NodeLF* x);
     int getBalance(NodeLF* N) const;

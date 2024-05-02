@@ -35,7 +35,7 @@ bool AVLTreeLF::search(int k, NodeLF* node) {
     return result;
 }
 
-int AVLTreeLF::seek(int key, NodeLF** parent, Operation** parentOp, NodeLF** node, Operation** nodeOp, NodeLF* auxRoot, NodeLF* root) {
+int AVLTreeLF::seek(int key, NodeLF** parent, Operation** parentOp, NodeLF** node, Operation** nodeOp, NodeLF* auxRoot) {
     NodeLF* next;
     int result;
     bool retry = false;
@@ -44,7 +44,7 @@ int AVLTreeLF::seek(int key, NodeLF** parent, Operation** parentOp, NodeLF** nod
         *node = auxRoot;
         *nodeOp = (*node)->op;
         if (getFlag(*nodeOp)!=NONE && auxRoot==root) {
-            bstHelpInsert(unflag(*nodeOp), *node);
+            helpInsert(unflag(*nodeOp), *node);
             continue;
         }
         next = (*node)->right;
@@ -54,7 +54,7 @@ int AVLTreeLF::seek(int key, NodeLF** parent, Operation** parentOp, NodeLF** nod
             *node = next;
             *nodeOp = (*node)->op;
             if (getFlag(nodeOp) != NONE) {
-                help(*parent, *parentOp, *node, *nodeOp);
+                helpSeek(*parent, *parentOp, *node, *nodeOp);
                 retry = true;
                 break;
             }
@@ -76,7 +76,7 @@ int AVLTreeLF::seek(int key, NodeLF** parent, Operation** parentOp, NodeLF** nod
     return result;
 }
 
-bool AVLTreeLF::insert(int key, NodeLF* root) {
+bool AVLTreeLF::insert(int key) {
     NodeLF* parent;
     NodeLF* current;
     NodeLF* newNode = nullptr;
@@ -84,9 +84,8 @@ bool AVLTreeLF::insert(int key, NodeLF* root) {
     Operation* currentOp;
     Operation* casOp;
     int result = 0;
-
     while (true) {
-        result = seek(key, &parent, &parentOp, &current, &currentOp, root, root);
+        result = seek(key, &parent, &parentOp, &current, &currentOp, root);
         if (result==0)
             return false;
         if (newNode==nullptr)
@@ -100,3 +99,38 @@ bool AVLTreeLF::insert(int key, NodeLF* root) {
         }
     }
 }
+
+bool AVLTreeLF::deleteNode(int key) {
+    NodeLF* parent;
+    NodeLF* node;
+    Operation* parentOp;
+    Operation* nodeOp;
+    while (true) {
+        int result = seek(key, &parent, &parentOp, &node, &nodeOp, root);
+        if (result!=0)
+            return false;
+        if (__sync_bool_compare_and_swap(&(node->op), nodeOp, SET_FLAG(currOp, MARK)))
+            return true;
+    }
+}
+
+void AVLTreeLF::helpSeek(NodeLF* parent, Operation* parentOp, NodeLF* node, NodelF* nodeOp) {
+    if (getFlag(nodeOp)==INSERT)
+        helpInsert(unflag(nodeOp), node);
+    else if (getFlag(parentOp)==ROTATE)
+        helpRotate((unflag(parentOp), parent, node, parentOp->child);
+    else if (getFlag(nodeOp)==MARK)
+        helpMarked(parent, parentOp, node);
+}
+
+void AVLTreeLF::helpInsert(Operation* op, NodeLF* dest) {
+    InsertOp* insertOp = (InsertOp *)op;
+    volatile NodeLF** address = nullptr;
+    if (insertOp->isLeft)
+        address = (nodeLF**)&(dest→left);
+    else
+        address = (nodeLF**)&(dest→right);
+    __sync_bool_compare_and_swap(address, insertOp->expected, insertOp->update);
+    __sync_bool_compare_and_swap(&(dest->op), flag(op, INSERT), flag(op, NONE));
+}
+

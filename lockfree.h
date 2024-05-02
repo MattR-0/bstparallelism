@@ -2,11 +2,14 @@
 #include <vector>
 #include <mutex>
 
+class Operation {};
+
 class NodeLF {
 public:
     volatile int key;
     volatile NodeLF* left;
     volatile NodeLF* right;
+    volatile Operation* op;
 
     NodeLF(int key);
 };
@@ -14,7 +17,6 @@ public:
 class InsertOp : public Operation {
 public:
     bool isLeft;
-    bool isUpdate = false;
     NodeLF* expectedNode;
     NodeLF* newNode;
 

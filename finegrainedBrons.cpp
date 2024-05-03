@@ -14,16 +14,21 @@ static long GrowCountMask = 0xffL << 3;
 static long Shrinking = 0x4L;
 static long ShrinkCountIncr = 1L << 11;
 static long IgnoreGrow = ~(Growing | GrowCountMask);
-
+    
 // Specify the rollback of optimistic concurrency control
-static Object Retry = new Object();
+enum Status {RETRY, SUCCESS, FAILURE};
 
 //************************* Tree constructor **********************************/
-NodeFG::NodeFG(int k) : version(0), height(1), key(k), value(0);
+NodeFG::NodeFG(int k) : version(0), height(1), key(k), value(INT);
                         left(nullptr), right(nullptr), parent(nullptr), 
                         nodeLock() {}
 
-AVLTreeFG::AVLTreeFG() : root(nullptr) {}
+/* 
+* Root holder has no key, whose right child is the root. It allows all mutable 
+* nodes to have a non-null parent.
+*/
+// std::numeric_limits<int>::min()
+AVLTreeFG::AVLTreeFG() : root(nullptr), rootHolder(new NodeFG(-1)) {}
 
 AVLTreeFG::~AVLTreeFG() {
     freeTree(root);
@@ -46,8 +51,9 @@ int compare(int a, int b) {
 /******************** Helper functions for tree operations ********************/
 /* 
  * Return a child of a node based on given direction 
+ * dir = 0: left, dir = 1: right
  */
-bool AVLTreeFG::getChild(NodeFG* node, int dir) {
+NodeFG* AVLTreeFG::getChild(NodeFG* node, int dir) {
     assert(node != nullptr);
 
     if (dir == 0)
@@ -178,6 +184,20 @@ void AVLTreeFG::fixHeightAndRebalance(NodeFG* node) {
 }
 
 /* 
+ * Return the node with minimum key value in the given tree
+ */
+NodeFG* AVLTreeFG::minValueNode(NodeFG* node) {
+    NodeFG* current = node;
+    while (current->left != nullptr) {
+        current->left->nodeLock.lock();
+        current->nodeLock.unlock();
+        current = current->left;
+    }
+    // current node (the successor node to be deleted) acquires a lock at this point
+    return current;
+}
+
+/* 
  * Make a certain thread block until the change bit is not set
  */
 static int spinCount = 100;
@@ -196,43 +216,38 @@ void AVLTreeFG::waitUntilNotChanging(NodeFG* node) {
     return;
 }
 
-/* 
-* Root holder has no key, whose right child is the root. It allows all mutable 
-* nodes to have a non-null parent.
-*/
-NodeFG* rootHolder = new NodeFG(-1);
-
 /* Main operations: get, insert, delete */
 /*
  * Public search function that wraps the helper
+ * Start searching from the root of the tree and traverse down until either the
+ * key is found or we reach null
  */
 bool AVLTreeFG::search(int key) {
     // Note: actual root is the right child of rootHolder by implementation
     return (bool) attemptSearch(key, rootHolder, 1, 0);
 }
 
-/* dir = 0: left, dir = 1: right*/
 /*
  * Attempt a search of a key with hand-over-hand optimistic concurrency control
  * Return either a rollback signal, or found/not found boolean
  */
-int AVLTreeFG::attemptSearch(int key, NodeFG* node, int dir, long nodeV) {
+Status AVLTreeFG::attemptSearch(int key, NodeFG* node, int dir, long nodeV) {
     while(true) {
         NodeFG* child = getChild(node, dir);
 
         // Check valid read of parent node
         // Growing the subtree with this node does not affect the correctness
         // of the current search
-        if (((node.version ^ nodeV) & IgnoreGrow) != 0)
-            return Retry;
+        if (((node->version ^ nodeV) & IgnoreGrow) != 0)
+            return RETRY;
 
         // Target is not in the tree
         if (child == nullptr)
-            return NULL;
+            return FAILURE;
 
         // Target is found
         int dirNext = compare(key, child->key);
-        if (dirNext == 0) return child->key;
+        if (dirNext == 0) return SUCCESS;
 
         // At time t1: Issue a read
         // Read the associated version number v1 and block until the change bit is not set
@@ -248,14 +263,14 @@ int AVLTreeFG::attemptSearch(int key, NodeFG* node, int dir, long nodeV) {
         else if { (childVersion != Unlinked) && (child == getChild(node, dir))
             // At time t2: Validation
             // If version stays the same, read is valid
-            if (((node.version ^ nodeV) & IgnoreGrow) != 0) {
-                return Retry;
+            if (((node->version ^ nodeV) & IgnoreGrow) != 0) {
+                return RETRY;
             }
             // Commit
-            Object p = attemptSearch(key, child, nextD, childV);
+            Status p = attemptSearch(key, child, nextD, childV);
 
             // Read is successful
-            if (p != Retry)
+            if (p != RETRY)
                 return p; 
         }
     }
@@ -273,13 +288,13 @@ bool AVLTreeFG::insert(int key) {
  * Only account for insertion of new key, not update of existing key
  * Return either a rollback signal, or found/not found boolean
  */
- int AVLTreeFG::attempInsert(int key, NodeFG* node, int dir, long nodeV) {
-    Object p = Retry;
-    while (p == Retry) {
+ Status AVLTreeFG::attempInsert(int key, NodeFG* node, int dir, long nodeV) {
+    Status p = RETRY;
+    while (p == RETRY) {
         NodeFG* child = getChild(node, dir);
         // Validation of parent link
         if (((node->version ^ nodeV) & IgnoreGrow) != 0) {
-            return Retry;
+            return RETRY;
         }
         // Location of parent of the leaf node where new value will be inserted
         if (child == nullptr) {
@@ -290,7 +305,7 @@ bool AVLTreeFG::insert(int key) {
             // Node with key exists in tree
             if (dirNext == 0) {
                 // Ignore this update case
-                return child->key;
+                return FAILURE;
             }
             else {
                 long childV = child->version;
@@ -302,7 +317,7 @@ bool AVLTreeFG::insert(int key) {
                 // Child is still in the tree
                 else if (childV != Unlinked && child = getChild(node, dir)) {
                     if (((node->version ^ nodeV) & IgnoreGrow) != 0) {
-                        return Retry;
+                        return RETRY;
                     }
                     p = attempInsert(k, v, child, nextDir, chV);
                 }
@@ -317,7 +332,7 @@ bool AVLTreeFG::insert(int key) {
  * of the new leaf, and we must also guarantee that no other inserting thread may 
  * decide ot perform an insertion of the same key into a different parent.\
  */
-int AVLTreeFG::attempInsertHelper(int key, NodeFG* node, int dir, long nodeV) {
+Status AVLTreeFG::attempInsertHelper(int key, NodeFG* node, int dir, long nodeV) {
     // Synchronized atomic region
     node->nodeLock.lock();
 
@@ -326,7 +341,7 @@ int AVLTreeFG::attempInsertHelper(int key, NodeFG* node, int dir, long nodeV) {
     //    be inserted will invalidate the implicit range of the traversal arrived 
     //    at the parent
     if (((node->version ^ nodeV) & IgnoreGrow) != 0 || getChild(node, dir) != nullptr)
-        return Retry;
+        return RETRY;
 
     // Create new node at child pointer
     NodeFG* child = getChild(node, dir);
@@ -336,7 +351,7 @@ int AVLTreeFG::attempInsertHelper(int key, NodeFG* node, int dir, long nodeV) {
     node->nodeLock.unlock();
 
     fixHeightAndRebalance(node);
-    return nullptr;
+    return SUCCESS;
 }
 
 /*
@@ -351,17 +366,17 @@ bool AVLTreeFG::deleteNode(int key, NodeFG* node, int dir, long nodeV) {
  * Given partially external tree design, node to be deleted will be a leaf node,
  * which allows for a fixed number of atomic operations
  */
-int AVLTreeFG::attemptDeleteNode(int key, NodeFG* node, int dir, long nodeV) {
-    Object p = Retry;
-    while (p == Retry) {
+Status AVLTreeFG::attemptDeleteNode(int key, NodeFG* node, int dir, long nodeV) {
+    Status p = RETRY;
+    while (p == RETRY) {
         NodeFG* child = getChild(node, dir);
         // Validation of parent link
         if (((node->version ^ nodeV) & IgnoreGrow) != 0) {
-            return Retry;
+            return RETRY;
         }
         // Key is not found
         if (child == nullptr) {
-            return NULL;
+            return FAILURE;
         } 
         else {
             int dirNext = compare(k, child->key);
@@ -379,7 +394,7 @@ int AVLTreeFG::attemptDeleteNode(int key, NodeFG* node, int dir, long nodeV) {
                 // Child is still in the tree
                 else if (childV != Unlinked && child == getChild(node, dir)) {
                     if (((node->version ^ nodeV) & IgnoreGrow) != 0) {
-                        return Retry;
+                        return RETRY;
                     }
                     p = attemptDeleteNode(k, child, dirNext, childV);
                 }
@@ -393,11 +408,11 @@ int AVLTreeFG::attemptDeleteNode(int key, NodeFG* node, int dir, long nodeV) {
  * (1) unlink/remove node if parent has zero or one child
  * (2) made into routing node if parent has two children 
  */
-int AVLTreeFG::attemptRemoveNode(NodeFG* parent, NodeFG* node) {
+Status AVLTreeFG::attemptRemoveNode(NodeFG* parent, NodeFG* node) {
     // Check that node is not a routing node
-    // if (node->value == NULL) return NULL;
+    if (node->value == ROU) return FAILURE;
     
-    Object prev;
+    Status prev;
     // Check if the route should be unlinked or converted into routing node 
     if (!canUnlink(node)) {
         node->nodeLock.lock();
@@ -406,11 +421,12 @@ int AVLTreeFG::attemptRemoveNode(NodeFG* parent, NodeFG* node) {
         // (acquiring lock of parent as well is needed)
         if ((node->version == Unlinked) || canUnlink(node)) {
             node->nodeLock.unlock();
-            return Retry;
+            return RETRY;
         }
         // Make routing node
         prev = node->value;
-        node->value = NULL
+        assert(prev == INT);
+        node->value = ROU;
         node->nodeLock.unlock()        
     }
     else {
@@ -419,7 +435,7 @@ int AVLTreeFG::attemptRemoveNode(NodeFG* parent, NodeFG* node) {
         // Validation again
         if ((parent->version == Unlinked) || node->parent != parent || node->version == Unlinked) {
             parent->nodeLock.unlock();
-            return Retry;
+            return RETRY;
         }
 
         // Locks acquired for both parent and child for the unlinking to happen
@@ -427,7 +443,8 @@ int AVLTreeFG::attemptRemoveNode(NodeFG* parent, NodeFG* node) {
         
         // Make routing node
         prev = node->value;
-        node->value = NULL;
+        assert(prev == INT);
+        node->value = ROU;
 
         // Verify that unlinking is still possible --> Commit deletion
         if (canUnlink(node)) {
@@ -450,7 +467,7 @@ int AVLTreeFG::attemptRemoveNode(NodeFG* parent, NodeFG* node) {
         parent->nodeLock.unlock();
     }
     fixHeightAndRebalance(parent);
-    return prev;
+    return SUCCESS;
 }
 
 /*

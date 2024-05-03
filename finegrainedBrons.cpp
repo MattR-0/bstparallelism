@@ -207,6 +207,9 @@ void AVLTreeFG::waitUntilNotChanging(NodeFG* node) {
         int i = 0;
         while ((node->version) == v && i < spinCount) {
             i++;
+            if (v != node->version) {
+                return;
+            }
         }
         if (i == spinCount) {
             node->nodeLock.lock();
@@ -223,8 +226,38 @@ void AVLTreeFG::waitUntilNotChanging(NodeFG* node) {
  * key is found or we reach null
  */
 bool AVLTreeFG::search(int key) {
-    // Note: actual root is the right child of rootHolder by implementation
-    return (bool) attemptSearch(key, rootHolder, 1, 0);
+    while (true) {
+        // Note: actual root is the right child of rootHolder by definition
+        NodeFG* root = getChild(rootHolder, 1);
+        // Not found
+        if (root == nullptr) {
+            return false;
+        }
+        else {
+            int dirNext = compare(key, root->key);
+            // Found 
+            if (dirNext == 0) {
+                return true;
+            }
+            long rootV = root->version;
+            if ((rootV & Shrinking) != 0 || (rootV != Unlinked)) {
+                waitUntilNotChanging(root);
+            }
+            // Check linking is still valid
+            else if (root == rootHolder->right) {
+                Status s = attemptSearch(key, root, dirNext, rootV);
+                if (s == SUCCESS) {
+                    return true;
+                }
+                else if (s == FAILURE) {
+                    return false;
+                }
+                // Retry here otherwise
+            } 
+        }
+    }
+    throw "Invalid behavior in search! \n";
+    return false;
 }
 
 /*
@@ -247,11 +280,17 @@ Status AVLTreeFG::attemptSearch(int key, NodeFG* node, int dir, long nodeV) {
 
         // Target is found
         int dirNext = compare(key, child->key);
-        if (dirNext == 0) return SUCCESS;
+        if (dirNext == 0) {
+            if (child->value == ROU) {
+                // printf("Found a removed node \n");
+                return FAILURE;
+            }
+            return SUCCESS;
+        }
 
         // At time t1: Issue a read
         // Read the associated version number v1 and block until the change bit is not set
-        long childV = child.version;
+        long childV = child->version;
         if ((childV & Shrinking) != 0) {
             waitUntilNotChanging(child);
             // Retry when blocking finishes
@@ -260,14 +299,14 @@ Status AVLTreeFG::attemptSearch(int key, NodeFG* node, int dir, long nodeV) {
         // Check if the link from parent to child is not modified
         // A search might become invalid if the subtree contains the key has 
         // been changed (shrink, grow, etc.) 
-        else if { (childVersion != Unlinked) && (child == getChild(node, dir))
+        else if { (childV != Unlinked) && (child == getChild(node, dir))
             // At time t2: Validation
             // If version stays the same, read is valid
             if (((node->version ^ nodeV) & IgnoreGrow) != 0) {
                 return RETRY;
             }
             // Commit
-            Status p = attemptSearch(key, child, nextD, childV);
+            Status p = attemptSearch(key, child, dirNext, childV);
 
             // Read is successful
             if (p != RETRY)
@@ -319,7 +358,7 @@ bool AVLTreeFG::insert(int key) {
                     if (((node->version ^ nodeV) & IgnoreGrow) != 0) {
                         return RETRY;
                     }
-                    p = attempInsert(k, v, child, nextDir, chV);
+                    p = attempInsert(k, v, child, dirNext, chV);
                 }
             }
         }

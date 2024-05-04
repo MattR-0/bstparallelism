@@ -1,9 +1,10 @@
 #include "finegrained.h"
+#include <iostream>
 #include <mutex>
 
-NodeFG::NodeFG(int k) : key(k), left(nullptr), right(nullptr), height(1) {}
+NodeFG::NodeFG(int k) : key(k), left(nullptr), right(nullptr), height(1), nodeLock() {}
 
-AVLTreeFG::AVLTreeFG() : root(nullptr), readCount(0) {}
+AVLTreeFG::AVLTreeFG() : root(nullptr) {}
 
 AVLTreeFG::~AVLTreeFG() {
     freeTree(root);
@@ -55,21 +56,48 @@ int AVLTreeFG::getBalance(NodeFG* N) const {
 // Return the node with minimum key value in the given tree
 NodeFG* AVLTreeFG::minValueNode(NodeFG* node) {
     NodeFG* current = node;
-    while (current->left != nullptr)
+    while (current->left != nullptr) {
+        current->left->nodeLock.lock();
+        current->nodeLock.unlock();
         current = current->left;
+    }
+    // current node (the successor node to be deleted) acquires a lock at this point
     return current;
 }
 
-// Recursive function to insert a key in the subtree rooted with node.
-// Returns the new root of the subtree.
 NodeFG* AVLTreeFG::insertHelper(NodeFG* node, int key, bool& err) {
-    // 1. Perform the normal BST insertion
-    if (node == nullptr)
-        return new NodeFG(key);
-    if (key < node->key)
-        node->left = insertHelper(node->left, key, err);
-    else if (key > node->key)
-        node->right = insertHelper(node->right, key, err);
+    if (node == nullptr) {
+        throw "Invalid insertion of node\n";
+        err = true;
+        return node;
+    }
+    if (key < node->key) {
+        if (node->left == NULL) {
+            // Critical section: the parent is protected, so only one thread can update the child at a time
+            node->left = new NodeFG(key); 
+            // Release control once child is inserted
+            node->nodeLock.unlock(); 
+            // Check for balance after insertion
+        }
+        else {
+            // Hand-over-hand pattern:
+            // The child acquires the lock first, then the parent releases the lock
+            node->left->nodeLock.lock();
+            node->nodeLock.unlock();
+            node->left = insertHelper(node->left, key, err);
+        }
+    }
+    else if (key > node->key) {
+        if (node->right == NULL) {
+            node->right = new NodeFG(key);
+            node->nodeLock.unlock();
+        }
+        else {
+            node->right->nodeLock.lock();
+            node->nodeLock.unlock();
+            node->right = insertHelper(node->right, key, err);
+        }
+    }
     else {
         err = true;
         return node;
@@ -81,13 +109,13 @@ NodeFG* AVLTreeFG::insertHelper(NodeFG* node, int key, bool& err) {
     // If this node becomes unbalanced, then there are 4 cases
     if (balance > 1 && key < node->left->key)
         return rightRotate(node);
-    if (balance < -1 && key > node->right->key)
+    else if (balance < -1 && key > node->right->key)
         return leftRotate(node);
-    if (balance > 1 && key > node->left->key) {
+    else if (balance > 1 && key > node->left->key) {
         node->left = leftRotate(node->left);
         return rightRotate(node);
     }
-    if (balance < -1 && key < node->right->key) {
+    else if (balance < -1 && key < node->right->key) {
         node->right = rightRotate(node->right);
         return leftRotate(node);
     }
@@ -97,35 +125,60 @@ NodeFG* AVLTreeFG::insertHelper(NodeFG* node, int key, bool& err) {
 // Public insert function that wraps the helper
 bool AVLTreeFG::insert(int key) {
     bool err = false;
+    if (root == nullptr) {
+        root = new NodeFG(key);
+        return !err;
+    }
+    root->nodeLock.lock();
     root = insertHelper(root, key, err);
     return !err;
 }
 
 // Recursive function to delete a node with given key from subtree with given root.
-// Returns root of the modified subtree.
 NodeFG* AVLTreeFG::deleteHelper(NodeFG* node, int key, bool& err) {
     // STEP 1: Perform standard BST delete
-    if (node == nullptr) {
+    if (node == nullptr) { // Invalid case
         err = true;
         return node;
     }
-    if (key < node->key)
+    if (key < node->key) {
+        // Hand-over-hand locking until the node to be deleted is found
+        node->left->nodeLock.lock();
+        node->nodeLock.unlock();
         node->left = deleteHelper(node->left, key, err);
-    else if (key > node->key)
+    }
+    else if (key > node->key) {
+        node->right->nodeLock.lock();
+        node->nodeLock.unlock();
         node->right = deleteHelper(node->right, key, err);
+    }
     else { // This is the node to be deleted
         if (node->left == nullptr || node->right == nullptr) {
             NodeFG* temp = node->left ? node->left : node->right;
+            // Case 1: No child
             if (temp == nullptr) {
-                temp = node;
-                node = nullptr;
-            } else {
-                *node = *temp;
+               temp = node;
+               node = nullptr;
+               delete temp;
+            } 
+            // Case 2: One child
+            else {
+                temp->nodeLock.lock(); // Hand-over-hand locking for the child
+                node->key = temp->key;  
+                node->left = temp->left; 
+                node->right = temp->right;  
+                temp->nodeLock.unlock();
+                delete temp;
+                node->nodeLock.unlock();
             }
-            delete temp;
         } else {
-            NodeFG* temp = minValueNode(node->right);
-            node->key = temp->key;
+            node->right->nodeLock.lock();
+            NodeFG* temp = minValueNode(node->right); // successor
+            node->key = temp->key; // both nodes should have lock here
+            // Note: temp is not necessarily leaf node
+            // Temp does not have a left child because it has min key in the
+            // right branch of the node, but it might have a right child
+            node->nodeLock.unlock(); // deletion complete
             node->right = deleteHelper(node->right, temp->key, err);
         }
     }
@@ -137,30 +190,36 @@ NodeFG* AVLTreeFG::deleteHelper(NodeFG* node, int key, bool& err) {
     node->height = 1 + std::max(height(node->left), height(node->right));
     // Step 3: check whether this node became unbalanced
     int balance = getBalance(node);
-    if (balance > 1 && getBalance(node->left) >= 0)
+    // If this node becomes unbalanced, then there are 4 cases
+    if (balance > 1 && key < node->left->key)
         return rightRotate(node);
-    if (balance > 1 && getBalance(node->left) < 0) {
+    else if (balance < -1 && key > node->right->key)
+        return leftRotate(node);
+    else if (balance > 1 && key > node->left->key) {
         node->left = leftRotate(node->left);
         return rightRotate(node);
     }
-    if (balance < -1 && getBalance(node->right) <= 0)
-        return leftRotate(node);
-    if (balance < -1 && getBalance(node->right) > 0) {
+    else if (balance < -1 && key < node->right->key) {
         node->right = rightRotate(node->right);
         return leftRotate(node);
-    }
+    }    
     return node;
 }
 
 // Public delete function that wraps the helper
 bool AVLTreeFG::deleteNode(int key) {
     bool err = false;
+    if (root == nullptr) {
+        throw "Invalid deletion";
+        return err;
+    }
+    root->nodeLock.lock();
     root = deleteHelper(root, key, err);
     return !err;
 }
 
 // Search for the given key in the subtree rooted with given node
-bool AVLTreeFG::searchHelper(NodeFG* node, int key) const {
+bool AVLTreeFG::searchHelper(NodeFG* node, int key) const {    
     if (node == nullptr)
         return false;
     if (key == node->key)
@@ -174,7 +233,7 @@ bool AVLTreeFG::searchHelper(NodeFG* node, int key) const {
 bool AVLTreeFG::search(int key) {
     bool found = searchHelper(root, key);
     return found;
-}
+}   
 
 // A utility function to print preorder traversal of the tree.
 // The function also prints the height of every node.

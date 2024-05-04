@@ -1,23 +1,28 @@
 #include <bits/stdc++.h>
 #include "coarsegrained.h"
+#include "finegrained.h"
 using namespace std;
 
 // Coarse-grained: IMPL=1, fine-grained: IMPL=2, lock-free: IMPL=3
-#define IMPL 1
+#define IMPL 2
 #define NUM_THREADS 8
 #define THREAD_SIZE 1000
 
 AVLTreeCG *treeCG;
+AVLTreeFG *treeFG;
 
 /* UTILITY FUNCTIONS */
 void initTree() {
     if (IMPL==1) treeCG = new AVLTreeCG();
+    if (IMPL==2) treeFG = new AVLTreeFG();
 }
 
 void deleteTree() {
     if (IMPL==1) delete treeCG;
+    if (IMPL==2) delete treeFG;
 }
 
+/* Return a random vector of key inputs */
 std::vector<int> getShuffledVector(int low, int high) {
     std::vector<int> v(high-low);
     std::iota(v.begin(), v.end(), low);
@@ -29,14 +34,17 @@ std::vector<int> getShuffledVector(int low, int high) {
 
 bool flexInsert(int k) {
     if (IMPL==1) return treeCG->insert(k);
+    if (IMPL==2) return treeFG->insert(k);
 }
 
 bool flexDelete(int k) {
     if (IMPL==1) return treeCG->deleteNode(k);
+    if (IMPL==2) return treeFG->deleteNode(k);
 }
 
 bool flexSearch(int k) {
     if (IMPL==1) return treeCG->search(k);
+    if (IMPL==2) return treeFG->search(k);
 }
 
 /* HELPER FUNCTIONS */
@@ -90,9 +98,30 @@ int checkHeightAndBalanceCG(NodeCG* node) {
     return node->height;
 }
 
+int checkHeightAndBalanceFG(NodeFG* node) {
+    if (node==nullptr) return 0;
+    int leftHeight = checkHeightAndBalanceFG(node->left);
+    int rightHeight = checkHeightAndBalanceFG(node->right);
+    if (node->height != 1+std::max(leftHeight, rightHeight))
+        throw std::runtime_error("Node height is incorrect");
+    int balance = leftHeight-rightHeight;
+    if (balance<-1 || balance>1)
+        throw std::runtime_error("Node is unbalanced");
+    if (node->left && node->left->key>=node->key)
+        throw std::runtime_error("Left child key is greater or equal to node key");
+    if (node->right && node->right->key<=node->key)
+        throw std::runtime_error("Right child key is lesser or equal to node key");
+    if (node->left==node || node->right==node)
+        throw std::runtime_error("Circular reference detected");
+    return node->height;
+}
+
 int checkHeightAndBalance() {
     if (IMPL==1) {
         return checkHeightAndBalanceCG(treeCG->root);
+    }
+    if (IMPL==2) {
+        return checkHeightAndBalanceFG(treeFG->root);
     }
 }
 
@@ -111,6 +140,19 @@ void testSequentialSearch() {
         treeRoot->right->right->left=new NodeCG(73);
         treeRoot->left->right->left=new NodeCG(15);
         treeRoot->left->left->right=new NodeCG(2);
+    }
+    if (IMPL==2) {
+        treeFG->root=new NodeFG(20);
+        NodeFG* treeRoot = treeFG->root;
+        treeRoot->left=new NodeFG(12);
+        treeRoot->right=new NodeFG(53);
+        treeRoot->left->left=new NodeFG(0);
+        treeRoot->right->left=new NodeFG(21);
+        treeRoot->left->right=new NodeFG(17);
+        treeRoot->right->right=new NodeFG(82);
+        treeRoot->right->right->left=new NodeFG(73);
+        treeRoot->left->right->left=new NodeFG(15);
+        treeRoot->left->left->right=new NodeFG(2);
     }
     std::set<int> elems = {20,12,53,0,21,17,82,73,15,2};
     for (int i=0; i<100; i++) {
@@ -154,6 +196,7 @@ void testConcurrentInsert() {
     }
     for (int i=0; i<NUM_THREADS; i++) {
         threads[i].join();
+        printf("Reached here\n");
     }
     for (int i=0; i<NUM_THREADS*100; i++) {
         if (!flexSearch(i)) {

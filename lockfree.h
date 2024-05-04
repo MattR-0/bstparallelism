@@ -9,7 +9,12 @@ public:
     volatile int key;
     volatile NodeLF* left;
     volatile NodeLF* right;
+    volatile int height;
+    volatile int lh;
+    volatile int rh;
     volatile Operation* op;
+    volatile bool deleted;
+    volatile bool removed;
 
     NodeLF(int key);
 };
@@ -20,14 +25,18 @@ public:
     NodeLF* expectedNode;
     NodeLF* newNode;
 
-    InsertOp(bool isLeft, bool isUpdate, NodeLF* expected, NodeLF* new);
+    InsertOp(bool isLeft, NodeLF* expected, NodeLF* new);
 };
 
 class RotateOp : public Operation {
 public:
     volatile int state = 0;
+    NodeLF* parent;
     NodeLF* node;
+    NodeLF* child;
+    Operation* parentOp;
     Operation* nodeOp;
+    Operation* childOp;
     bool rightR;
     bool dir;
     int oldKey;

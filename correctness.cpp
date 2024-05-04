@@ -1,25 +1,29 @@
 #include <bits/stdc++.h>
 #include "coarsegrained.h"
 #include "finegrained.h"
+#include "lockfree2.h"
 using namespace std;
 
 // Coarse-grained: IMPL=1, fine-grained: IMPL=2, lock-free: IMPL=3
-#define IMPL 2
+#define IMPL 3
 #define NUM_THREADS 8
 #define THREAD_SIZE 1000
 
 AVLTreeCG *treeCG;
 AVLTreeFG *treeFG;
+AVLTree *treeLF;
 
 /* UTILITY FUNCTIONS */
 void initTree() {
     if (IMPL==1) treeCG = new AVLTreeCG();
     if (IMPL==2) treeFG = new AVLTreeFG();
+    if (IMPL==3) treeLF = new AVLTree();
 }
 
 void deleteTree() {
     if (IMPL==1) delete treeCG;
     if (IMPL==2) delete treeFG;
+    if (IMPL==3) delete treeLF;
 }
 
 /* Return a random vector of key inputs */
@@ -35,16 +39,19 @@ std::vector<int> getShuffledVector(int low, int high) {
 bool flexInsert(int k) {
     if (IMPL==1) return treeCG->insert(k);
     if (IMPL==2) return treeFG->insert(k);
+    if (IMPL==3) return treeLF->insert(k);
 }
 
 bool flexDelete(int k) {
     if (IMPL==1) return treeCG->deleteNode(k);
     if (IMPL==2) return treeFG->deleteNode(k);
+    if (IMPL==3) return treeLF->deleteNode(k);
 }
 
 bool flexSearch(int k) {
     if (IMPL==1) return treeCG->search(k);
     if (IMPL==2) return treeFG->search(k);
+    if (IMPL==3) return treeLF->search(k);
 }
 
 /* HELPER FUNCTIONS */
@@ -123,6 +130,8 @@ int checkHeightAndBalance() {
     if (IMPL==2) {
         return checkHeightAndBalanceFG(treeFG->root);
     }
+    if (IMPL==3) {}
+    return 0
 }
 
 /* TEST FUNCTIONS */

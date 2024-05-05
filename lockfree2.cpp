@@ -1,6 +1,57 @@
 #include "lockfree2.h"
 #include <limits.h>
 
+
+
+thread_local TIDGenerator kcas_tid;
+KCASHTM<100000> kcas::instance;
+
+void kcas::writeInitPtr(uintptr_t volatile * addr, uintptr_t const newval) {
+    instance.writeInitPtr(addr, newval);
+}
+
+void kcas::writeInitVal(uintptr_t volatile * addr, uintptr_t const newval) {
+    instance.writeInitVal(addr, newval);
+}
+
+uintptr_t kcas::readPtr(uintptr_t volatile * addr) {
+    return instance.readPtr(addr);
+}
+
+uintptr_t kcas::readVal(uintptr_t volatile * addr) {
+    return instance.readVal(addr);
+}
+
+bool kcas::execute() {
+    return instance.execute();
+}
+
+kcasptr_t kcas::getDescriptor() {
+    return instance.getDescriptor();
+}
+
+void kcas::start() {
+    instance.start();
+}
+
+template<typename T>
+void kcas::add(casword<T> * caswordptr, T oldVal, T newVal) {
+    instance.add(caswordptr, oldVal, newVal);
+}
+
+template<typename T, typename... Args>
+void kcas::add(casword<T> * caswordptr, T oldVal, T newVal, Args... args) {
+    instance.add(caswordptr, oldVal, newVal, args...);
+}
+
+
+
+template void kcas::add<int>(casword<int>*, int, int);
+template void kcas::add<uint64_t>(casword<uint64_t>*, uint64_t, uint64_t);
+template void kcas::add<Node*>(casword<Node*>*, Node*, Node*);
+
+
+
 Node::Node(int k, int v) {
     ver.setInitVal(0);
     key.setInitVal(k);
@@ -305,7 +356,7 @@ int AVLTree::fixHeight(Node* n, uint64_t nVer) {
         kcas::add(&l->ver, rVer, rVer);
     }
     int oldHeight = n->height;
-    int newHeight = 1 + (max(l->height.getValue(), r->height.getValue()));
+    int newHeight = 1 + (std::max(l->height.getValue(), r->height.getValue()));
     if (oldHeight==newHeight) // If the height is correct, no need to update
         if (n->ver==nVer && (l==NULL || l->ver==lVer) && (r==NULL || r->ver==rVer))
             return -1; // UNNECESSARY
@@ -352,8 +403,8 @@ bool AVLTree::rotateRight(Node* p, uint64_t pVer, Node* n, uint64_t nVer, Node* 
     }
     int oldNHeight = n->height;
     int oldLHeight = l->height;
-    int newNHeight = 1 + max(lrHeight, rHeight);
-    int newLHeight = 1 + max(llHeight, newNHeight);
+    int newNHeight = 1 + std::max(lrHeight, rHeight);
+    int newLHeight = 1 + std::max(llHeight, newNHeight);
     kcas::add(&l->parent, n, p);
     kcas::add(&n->left, l, lr);
     kcas::add(&l->right, lr, n);
@@ -402,8 +453,8 @@ bool AVLTree::rotateLeft(Node* p, uint64_t pVer, Node* n, uint64_t nVer, Node* l
     }
     int oldNHeight = n->height;
     int oldRHeight = r->height;
-    int newNHeight = 1 + max(rlHeight, lHeight);
-    int newRHeight = 1 + max(rrHeight, newNHeight);
+    int newNHeight = 1 + std::max(rlHeight, lHeight);
+    int newRHeight = 1 + std::max(rrHeight, newNHeight);
     kcas::add(&r->parent, n, p);
     kcas::add(&n->right, r, rl);
     kcas::add(&r->left, rl, n);
@@ -462,9 +513,9 @@ bool AVLTree::rotateLeftRight(Node* p, uint64_t pVer, Node* n, uint64_t nVer, No
     int oldNHeight = n->height;
     int oldLHeight = l->height;
     int oldLRHeight = lr->height;
-    int newNHeight = 1 + max(lrrHeight, rHeight);
-    int newLHeight = 1 + max(llHeight, lrlHeight);
-    int newLRHeight = 1 + max(newNHeight, newLHeight);
+    int newNHeight = 1 + std::max(lrrHeight, rHeight);
+    int newLHeight = 1 + std::max(llHeight, lrlHeight);
+    int newLRHeight = 1 + std::max(newNHeight, newLHeight);
     kcas::add(&lr->parent, l, p);
     kcas::add(&lr->left, lrl, l);
     kcas::add(&l->parent, n, lr);
@@ -528,9 +579,9 @@ bool AVLTree::rotateRightLeft(Node* p, uint64_t pVer, Node* n, uint64_t nVer, No
     int oldNHeight = n->height;
     int oldRHeight = r->height;
     int oldRLHeight = rl->height;
-    int newNHeight = 1 + max(rllHeight, lHeight);
-    int newRHeight = 1 + max(rrHeight, rlrHeight);
-    int newRLHeight = 1 + max(newNHeight, newRHeight);
+    int newNHeight = 1 + std::max(rllHeight, lHeight);
+    int newRHeight = 1 + std::max(rrHeight, rlrHeight);
+    int newRLHeight = 1 + std::max(newNHeight, newRHeight);
     kcas::add(&rl->parent, r, p);
     kcas::add(&rl->right, rlr, r);
     kcas::add(&r->parent, n, rl);

@@ -16,42 +16,17 @@
 namespace kcas {
     extern KCASHTM<100000> instance;
 
-    inline void writeInitPtr(casword_t volatile * addr, casword_t const newval) {
-        return instance.writeInitPtr(addr, newval);
-    }
-
-    inline void writeInitVal(casword_t volatile * addr, casword_t const newval) {
-        return instance.writeInitVal(addr, newval);
-    }
-
-    inline casword_t readPtr(casword_t volatile * addr) {
-        return instance.readPtr(addr);
-    }
-
-    inline casword_t readVal(casword_t volatile * addr) {
-        return instance.readVal(addr);
-    }
-
-    inline bool execute() {
-        return instance.execute();
-    }
-
-    inline kcasptr_t getDescriptor() {
-        return instance.getDescriptor();
-    }
-
-    inline void start() {
-        return instance.start();
-    }
+    void writeInitPtr(uintptr_t volatile * addr, uintptr_t const newval);
+    void writeInitVal(uintptr_t volatile * addr, uintptr_t const newval);
+    uintptr_t readPtr(uintptr_t volatile * addr);
+    uintptr_t readVal(uintptr_t volatile * addr);
+    bool execute();
+    kcasptr_t getDescriptor();
+    void start();
 
     template<typename T>
-    inline void add(casword<T> * caswordptr, T oldVal, T newVal) {
-        return instance.add(caswordptr, oldVal, newVal);
-    }
+    void add(casword<T> * caswordptr, T oldVal, T newVal);
 
     template<typename T, typename... Args>
-    inline void add(casword<T> * caswordptr, T oldVal, T newVal, Args... args) {
-        instance.add(caswordptr, oldVal, newVal, args...);
-    }
-
+    void add(casword<T> * caswordptr, T oldVal, T newVal, Args... args);
 };

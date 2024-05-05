@@ -11,7 +11,7 @@ public:
     casword<int> height;
     casword<int> val;
     
-    Node(Node* p, int k, int v);
+    Node(int k, int v);
 };
 
 class AVLTree {
@@ -26,16 +26,18 @@ public:
     AVLTree();
     ~AVLTree();
 private:
-    std::tuple<casword<Node*>, casword<int>, casword<Node*>, casword<int>, bool> search(casword<int> key);
-    bool validatePath(std::vector<casword<Node*>> path, std::vector<casword<int>> vers, size_t sz);
-    bool insertIfAbsent(casword<int> k, casword<int> val);
-    bool erase(casword<int> k);
-    bool eraseTwoChild(casword<Node*> n, casword<int> nVer, casword<Node*> p, casword<int> pVer);
-    bool eraseSimple(casword<int> key, casword<Node*> n, casword<int> nVer, casword<Node*> p, casword<int> pVer);
-    void rebalance(casword<Node*> n);
-    int fixHeight(casword<Node*> n, casword<int> nVer);
-    bool rotateRight(casword<Node*> p, casword<int> pVer, casword<Node*> n, casword<int> nVer, casword<Node*> l, casword<int> lVer, casword<Node*> r, casword<int> rVer);
-    bool rotateLeft(casword<Node*> p, casword<int> pVer, casword<Node*> n, casword<int> nVer, casword<Node*> l, casword<int> lVer, casword<Node*> r, casword<int> rVer);
-    bool rotateLeftRight(casword<Node*> p, casword<int> pVer, casword<Node*> n, casword<int> nVer, casword<Node*> l, casword<int> lVer, casword<Node*> r, casword<int> rVer, casword<Node*> lr, casword<int> lrVer);
-    bool rotateRightLeft(casword<Node*> p, casword<int> pVer, casword<Node*> n, casword<int> nVer, casword<Node*> l, casword<int> lVer, casword<Node*> r, casword<int> rVer, casword<Node*> rl, casword<int> rlVer);
+    std::tuple<Node*, uint64_t, Node*, uint64_t, bool> searchHelper(int key);
+    bool validatePath(std::vector<Node*> path, std::vector<uint64_t> vers, size_t sz);
+    bool insertIfAbsent(int k, int val);
+    bool isMarked(uint64_t ver);
+    bool erase(int k);
+    bool eraseTwoChild(Node* n, uint64_t nVer, Node* p, uint64_t pVer);
+    bool eraseSimple(int key, Node* n, uint64_t nVer, Node* p, uint64_t pVer);
+    std::tuple<Node*, uint64_t, Node*, uint64_t, bool> getSuccessor(Node* n);
+    void rebalance(Node* n);
+    int fixHeight(Node* n, uint64_t nVer);
+    bool rotateRight(Node* p, uint64_t pVer, Node* n, uint64_t nVer, Node* l, uint64_t lVer, Node* r, uint64_t rVer);
+    bool rotateLeft(Node* p, uint64_t pVer, Node* n, uint64_t nVer, Node* l, uint64_t lVer, Node* r, uint64_t rVer);
+    bool rotateLeftRight(Node* p, uint64_t pVer, Node* n, uint64_t nVer, Node* l, uint64_t lVer, Node* r, uint64_t rVer, Node* lr, uint64_t lrVer);
+    bool rotateRightLeft(Node* p, uint64_t pVer, Node* n, uint64_t nVer, Node* l, uint64_t lVer, Node* r, uint64_t rVer, Node* rl, uint64_t rlVer);
 };

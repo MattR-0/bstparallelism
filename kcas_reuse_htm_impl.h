@@ -9,6 +9,28 @@
 
 using namespace std;
 
+#define CASWORD_BITS_TYPE casword_t
+#define casword_t uintptr_t
+#define SHIFT_BITS 2
+#define CASWORD_CAST(x) ((CASWORD_BITS_TYPE) (x))
+
+template <typename T>
+struct casword {
+private:
+    CASWORD_BITS_TYPE volatile bits;
+public:
+    casword();
+
+    T setInitVal(T other);
+
+    operator T();
+
+    T operator->();
+
+    T getValue();
+
+    void addToDescriptor(T oldVal, T newVal);
+};
 
 /**
  * Note: this algorithm supports a limited number of threads (print LAST_TID to see how many).
@@ -158,13 +180,13 @@ typedef intptr_t seqbits_t;
 #define KCAS_MAX_THREADS 500
 
 
-void * volatile thread_ids[KCAS_MAX_THREADS] = {};
 
 class TIDGenerator {
 public:
     int myslot = -1;
-    TIDGenerator() {
-	int i;
+    void * volatile thread_ids[KCAS_MAX_THREADS] = {};
+    inline TIDGenerator() {
+	    int i;
         while (true) {
 	    i = 0;
             while (thread_ids[i]){ ++i; }
@@ -178,26 +200,25 @@ public:
         }
     }
 
-    ~TIDGenerator() {
+    inline ~TIDGenerator() {
         thread_ids[myslot] = 0;
     }
 
-    operator int() {
+    inline operator int() {
         return myslot;
     }
 
-    int getId(){
+    inline int getId(){
 	return myslot;
     }
 
-    void explicitRelease() {
+    inline void explicitRelease() {
         thread_ids[myslot] = 0;
     }
 
 };
 
 
-thread_local TIDGenerator kcas_tid;
 
 struct rdcssdesc_t {
     volatile seqbits_t seqBits;
@@ -226,7 +247,7 @@ public:
     const static int size = sizeof(seqBits)+sizeof(numEntries)+sizeof(entries);
     volatile char padding[128+((64-size%64)%64)]; // add padding to prevent false sharing
 
-    void addValAddr(casword_t volatile * addr, casword_t oldval, casword_t newval) {
+    inline void addValAddr(casword_t volatile * addr, casword_t oldval, casword_t newval) {
         entries[numEntries].addr = addr;
         entries[numEntries].oldval = oldval << KCAS_LEFTSHIFT;
         entries[numEntries].newval = newval << KCAS_LEFTSHIFT;
@@ -234,7 +255,7 @@ public:
         assert(numEntries <= MAX_K);
     }
 
-    void addPtrAddr(casword_t volatile * addr, casword_t oldval, casword_t newval) {
+    inline void addPtrAddr(casword_t volatile * addr, casword_t oldval, casword_t newval) {
         entries[numEntries].addr = addr;
         entries[numEntries].oldval = oldval;
         entries[numEntries].newval = newval;
@@ -242,15 +263,6 @@ public:
         assert(numEntries <= MAX_K);
     }
 };
-
-
-static bool isRdcss(casword_t val) {
-    return (val & RDCSS_TAGBIT);
-}
-
-static bool isKcas(casword_t val) {
-    return (val & KCAS_TAGBIT);
-}
 
 
 template <int MAX_K>
@@ -301,6 +313,15 @@ private:
     void rdcssHelpOther(rdcsstagptr_t tagptr);
 };
 
+thread_local TIDGenerator kcas_tid;
+
+bool isRdcss(casword_t val) {
+    return (val & RDCSS_TAGBIT);
+}
+
+bool isKcas(casword_t val) {
+    return (val & KCAS_TAGBIT);
+}
 
 template <int MAX_K>
 void KCASHTM<MAX_K>::rdcssHelp(rdcsstagptr_t tagptr, rdcssptr_t snapshot, bool helpingOther) {
@@ -535,4 +556,68 @@ template<typename T, typename... Args>
 void KCASHTM<MAX_K>::add(casword<T> * caswordptr, T oldVal, T newVal, Args... args) {
     caswordptr->addToDescriptor(oldVal, newVal);
     add(args...);
+}
+
+
+KCASHTM<100000> kcasInstance;
+
+template <typename T>
+casword<T>::casword(){
+    T a;
+    bits =  bits = CASWORD_CAST(a);
+}
+
+template <typename T>
+T casword<T>::setInitVal(T other) {
+    if(is_pointer<T>::value){
+	bits = CASWORD_CAST(other);
+    }
+    else {
+	bits = CASWORD_CAST(other);
+	assert((bits & 0xE000000000000000) == 0);
+	bits = bits << SHIFT_BITS;
+    }
+
+    return other;
+}
+
+template <typename T>
+casword<T>::operator T() {
+    if(is_pointer<T>::value){
+	return (T)kcasInstance.readPtr(&bits);
+    }
+    else {
+	return (T)kcasInstance.readVal(&bits);
+    }
+}
+
+template <typename T>
+T casword<T>::operator->() {
+    assert(is_pointer<T>::value);
+    return *this;
+}
+
+template <typename T>
+T casword<T>::getValue(){
+    if(is_pointer<T>::value){
+	return (T)kcasInstance.readPtr(&bits);
+    }
+    else {
+	return (T)kcasInstance.readVal(&bits);
+    }
+}
+
+template <typename T>
+void casword<T>::addToDescriptor(T oldVal, T newVal){
+    auto descriptor = kcasInstance.getDescriptor();
+    auto c_oldVal = (casword_t)oldVal;
+    auto c_newVal = (casword_t)newVal;
+    assert(((c_oldVal & 0xE000000000000000) == 0) && ((c_newVal & 0xE000000000000000) == 0));
+
+    if(is_pointer<T>::value){
+	descriptor->addPtrAddr(&bits, c_oldVal, c_newVal);
+    }
+    else {
+	descriptor->addValAddr(&bits, c_oldVal, c_newVal);
+    }
 }

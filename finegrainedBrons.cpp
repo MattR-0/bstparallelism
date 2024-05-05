@@ -626,7 +626,41 @@ Status AVLTreeFG::attemptSearch(int key, NodeFG* node, int dir, long nodeV) {
  * Public insert function that wraps the helper
  */
 bool AVLTreeFG::insert(int key) {
-    return attemptInsert(key, rootHolder, 1, 0);
+    while (true) {
+        NodeFG* root = getChild(rootHolder, 1);
+        // Insert into null root
+        if (root == nullptr) {
+            rootHolder->nodeLock.lock();
+            rootHolder->right = new NodeFG(key);
+            rootHolder->height = 2;
+            rootHolder->nodeLock.unlock();
+            return true;
+        }
+        else {
+            int dirNext = compare(key, root->key);
+            // Ignore case of updating existing key 
+            if (dirNext == 0) {
+                return false;
+            }
+            long rootV = root->version;
+            if ((rootV & Shrinking) != 0 || (rootV != Unlinked)) {
+                waitUntilNotChanging(root);
+            }
+            // Check linking is still valid
+            else if (root == rootHolder->right) {
+                Status s = attempInsert(key, root, dirNext, rootV);
+                if (s == SUCCESS) {
+                    return true;
+                }
+                else if (s == FAILURE) {
+                    return false;
+                }
+                // Retry here otherwise
+            } 
+        }
+    }
+    throw "Invalid behavior in insert! \n";
+    return false;
 }
 
 /*
@@ -704,7 +738,43 @@ Status AVLTreeFG::attempInsertHelper(int key, NodeFG* node, int dir, long nodeV)
  * Public delete function that wraps the helper
  */ 
 bool AVLTreeFG::deleteNode(int key, NodeFG* node, int dir, long nodeV) {
-    return attemptDeleteNode(key, rootHolder, 1, 0);
+ while (true) {
+        NodeFG* root = getChild(rootHolder, 1);
+        // Insert into null root
+        if (root == nullptr) {
+            printf("Delete from empty tree! \n");
+            return false;
+        }
+        else {
+            int dirNext = compare(key, root->key);
+            // Found node to be deleted
+            if (dirNext == 0) {
+                if(attemptRemoveNode(rootHolder, root) == SUCCESS) {
+                    return true;
+                }
+                else {
+                    return false;
+                }
+            }
+            long rootV = root->version;
+            if ((rootV & Shrinking) != 0 || (rootV != Unlinked)) {
+                waitUntilNotChanging(root);
+            }
+            // Check linking is still valid
+            else if (root == rootHolder->right) {
+                Status s = attemptDeleteNode(key, root, dirNext, rootV);
+                if (s == SUCCESS) {
+                    return true;
+                }
+                else if (s == FAILURE) {
+                    return false;
+                }
+                // Retry here otherwise
+            } 
+        }
+    }
+    throw "Invalid behavior in delete! \n";
+    return false;
 }
 
 /* 
@@ -780,7 +850,10 @@ bool AVLTreeFG::attemptUnlinkNoLock(NodeFG* parent, NodeFG* node){
  */
 Status AVLTreeFG::attemptRemoveNode(NodeFG* parent, NodeFG* node) {
     // Check that node is not a routing/removed node
-    if (node->value == REM) return FAILURE;
+    if (node->value == REM) {
+        printf("Trying to delete removed node \n");
+        return FAILURE;
+    }
     
     Status prev;
     // Check if the route should be unlinked or converted into routing node 

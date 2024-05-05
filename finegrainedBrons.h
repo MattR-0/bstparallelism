@@ -21,7 +21,7 @@
 
 class AVLTreeFG {
 public:
-    NodeFG* root;
+    // NodeFG* root;
     AVLTreeFG();
     ~AVLTreeFG();
 

@@ -1,12 +1,24 @@
 #include "lockfree2.h"
 #include <limits.h>
 
-Node::Node(casword<Node*> p, casword<int> k, casword<int> v): ver(0), key(k), left(nullptr), right(nullptr), parent(p), height(1), val(v) {}
-AVLTree::AVLTree(): maxRoot(new Node(nullptr, INT_MAX, 0)), minRoot(nullptr, INT_MIN, 0), kcas(kcas::KCASLockFree()) {
-    minRoot->parent = maxRoot;
-    maxRoot->left = minRoot;
+Node::Node(Node* p, int k, int v) {
+    ver.setInitVal(0);
+    key.setInitVal(k);
+    left.setInitVal(NULL);
+    right.setInitVal(NULL);
+    parent.setInitVal(p);
+    height.setInitVal(1);
+    val.setInitVal(v);
 }
-AVLTree::~AVLTree(): {}
+AVLTree::AVLTree() {
+    Node* maxNode = new Node(NULL, INT_MAX, 0);
+    Node* minNode = new Node(NULL, INT_MIN, 0);
+    maxRoot->left = minRoot;
+    minNode->parent = maxRoot;
+    maxRoot.setInitVal(maxNode);
+    minRoot.setInitVal(minNode);
+}
+AVLTree::~AVLTree() {}
 
 bool AVLTree::search(int k) {
     auto [n, nvers, p, pvers, res] = searchHelper((casword<int>)k);

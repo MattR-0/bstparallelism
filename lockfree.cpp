@@ -9,15 +9,19 @@ enum opFlag {
 };
 
 Operation* AVLTreeLF::flag(Operation* op, int status) {
-    (Operation*) ((uintptr_t)op | status);
+    return (Operation*) ((uintptr_t)op | status);
 }
 
 Operation* AVLTreeLF::getFlag(Operation* op) {
-    (Operation*) ((uintptr_t)op & FLAG_MASK);
+    return (Operation*) ((uintptr_t)op & FLAG_MASK);
 }
 
 Operation* AVLTreeLF::unflag(Operation* op) {
     return (Operation*)(((uintptr_t)op >> 2) << 2);
+}
+
+Operation* AVLTreeLF::setNull(Operation* op) {
+    return (NodeLF*)((uintptr_t) node | NULL_MASK);
 }
 
 bool AVLTreeLF::search(int k, NodeLF* node) {
@@ -109,8 +113,10 @@ bool AVLTreeLF::deleteNode(int key) {
         int result = seek(key, &parent, &parentOp, &node, &nodeOp, root);
         if (result!=0)
             return false;
-        if (__sync_bool_compare_and_swap(&(node->op), nodeOp, SET_FLAG(currOp, MARK)))
+        if (__sync_bool_compare_and_swap(&(node->op), nodeOp, SET_FLAG(currOp, MARK))) {
+            helpMarked(parent, parentOp, node);
             return true;
+        }
     }
 }
 
@@ -127,10 +133,27 @@ void AVLTreeLF::helpInsert(Operation* op, NodeLF* dest) {
     InsertOp* insertOp = (InsertOp *)op;
     volatile NodeLF** address = nullptr;
     if (insertOp->isLeft)
-        address = (nodeLF**)&(dest→left);
+        address = (nodeLF**)&(dest->left);
     else
-        address = (nodeLF**)&(dest→right);
+        address = (nodeLF**)&(dest->right);
     __sync_bool_compare_and_swap(address, insertOp->expected, insertOp->update);
     __sync_bool_compare_and_swap(&(dest->op), flag(op, INSERT), flag(op, NONE));
 }
 
+void helpMarked(NodeLF* parent, Operation* parentOp, NodeLF* node) {
+    NodeLF* child, address;
+    if (node->left==nullptr)
+        if (node->right==nullptr)
+            child = (NodeLF*)setNull(node);
+        else
+            child = node->right;
+    else
+        child = node->left;
+    Operation* casOp = new InsertOp((node==parent->left), node, child);
+    if (__sync_bool_compare_and_swap(&parent->op, parentOp, setFlag(casOp, INSERT)))
+        helpInsert(casOp, parent);
+    else
+        delete casOp;
+}
+
+// HELP_ROTATE:

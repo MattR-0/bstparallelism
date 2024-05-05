@@ -130,7 +130,10 @@ int checkHeightAndBalance() {
     if (IMPL==2) {
         return checkHeightAndBalanceFG(treeFG->root);
     }
-    if (IMPL==3) {}
+    if (IMPL==3) {
+        
+    }
+    throw std::runtime_error("Invalid IMPL defined in correctness.cpp");
     return 0
 }
 

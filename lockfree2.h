@@ -1,4 +1,5 @@
 #include "kcasfull.h"
+#include <vector>
 
 class Node {
 public:
@@ -10,7 +11,7 @@ public:
     casword<int> height;
     casword<int> val;
     
-    Node(casword<Node*> p, casword<int> k, casword<int> v);
+    Node(Node* p, int k, int v);
 };
 
 class AVLTree {

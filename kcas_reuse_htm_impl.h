@@ -313,13 +313,13 @@ private:
     void rdcssHelpOther(rdcsstagptr_t tagptr);
 };
 
-thread_local TIDGenerator kcas_tid;
+extern thread_local TIDGenerator kcas_tid;
 
-bool isRdcss(casword_t val) {
+inline bool isRdcss(casword_t val) {
     return (val & RDCSS_TAGBIT);
 }
 
-bool isKcas(casword_t val) {
+inline bool isKcas(casword_t val) {
     return (val & KCAS_TAGBIT);
 }
 
@@ -559,7 +559,7 @@ void KCASHTM<MAX_K>::add(casword<T> * caswordptr, T oldVal, T newVal, Args... ar
 }
 
 
-KCASHTM<100000> kcasInstance;
+extern KCASHTM<100000> kcasInstance;
 
 template <typename T>
 casword<T>::casword(){

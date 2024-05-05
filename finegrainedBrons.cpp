@@ -14,9 +14,6 @@ static long GrowCountMask = 0xffL << 3;
 static long Shrinking = 0x4L;
 static long ShrinkCountIncr = 1L << 11;
 static long IgnoreGrow = ~(Growing | GrowCountMask);
-    
-// Specify the rollback of optimistic concurrency control
-enum Status {RETRY, SUCCESS, FAILURE};
 
 //************************* Tree constructor **********************************/
 NodeFG::NodeFG(int k) : version(0), height(1), key(k), value(INT);
@@ -66,76 +63,6 @@ NodeFG* AVLTreeFG::getChild(NodeFG* node, int dir) {
 }
 
 /* 
- * A node can be unlinked if it has fewer than two children
- * It will be converted to a routing node otherwise
- */
-bool AVLTreeFG::canUnlink(NodeFG* node) {
-    return node->left == nullptr || node->right == nullptr;
-}
-
-/*
- * Right rotate subtree rooted at node
- */
-void AVLTreeFG::rightRotate(NodeFG* node) {
-    // Basic AVL rotation
-    NodeFG* nP = node->parent;
-    NodeFG* nL = node->left;
-    NodeFG* nLR = nL->right;
-
-    node->version |= Shrinking;
-    nL->version |= Growing;
-
-    node->left = nLR;
-    nL->right = node;
-
-    // Parent update
-    if (nP->left == node) nP->left = nL;
-    else nP->right = nL;
-    nL->parent = nP;
-    node->parent = nL;
-    if (nLR != nullptr) nLR->parent = node;
-
-    // Height update
-    node->height = std::max(height(node->left), height(node->right)) + 1;
-    nL->height = std::max(height(nL->left), height(nL->right)) + 1;
-
-    // Version update
-    nL->version += GrowCountIncr;
-    node->version += ShrinkCountIncr;
-
-    return;
-}
-
-/*
- * Left rotate subtree rooted at node
- */ 
-void AVLTreeFG::leftRotate(NodeFG* node) {
-    NodeFG* nP = node->parent;
-    NodeFG* nR = node->right;
-    NodeFG* nRL = nR->left;
-
-    node->version |= Shrinking;
-    nR->version |= Growing;
-
-    node->right = nRL;
-    nR->left = node;
-
-    if (nP->left == node) nP->left = nR;
-    else nP->right = nR;
-    nR->parent = nP;
-    node->parent = nR;
-    if (nLR != nullptr) nRL->parent = node;
-
-    node->height = std::max(height(node->left), height(node->right)) + 1;
-    nR->height = std::max(height(nR->left), height(nR->right)) + 1;
-
-    nR->version += GrowCountIncr;
-    node->version += ShrinkCountIncr;
-
-    return;
-}
-
-/* 
  * Get height of tree
  */
 int AVLTreeFG::height(NodeFG* node) const {
@@ -153,34 +80,12 @@ int AVLTreeFG::getBalance(NodeFG* node) const {
     return height(node->left) - height(node->right);
 }
 
-/*
- * Calculate local height of subtree rooted at node and rebalance to maintain 
- * relaxed height invariant
+/* 
+ * A node can be unlinked if it has fewer than two children
+ * It will be converted to a routing node/marked remove otherwise
  */
-void AVLTreeFG::fixHeightAndRebalance(NodeFG* node) {
-    // Update height of this ancestor node
-    node->height = 1 + std::max(height(node->left), height(node->right));
-
-    // Get the balance factor of this ancestor node to check this node's balance
-    int balance = getBalance(node);
-
-    // If this node becomes unbalanced, then there are 4 cases
-    if (balance > 1 && key < node->left->key)
-        rightRotate(node);
-
-    else if (balance < -1 && key > node->right->key)
-        leftRotate(node);
-
-    else if (balance > 1 && key > node->left->key) {
-        leftRotate(node->left);
-        rightRotate(node);
-    }
-
-    else if (balance < -1 && key < node->right->key) {
-        rightRotate(node->right);
-        leftRotate(node);
-    }
-    return;
+bool AVLTreeFG::canUnlink(NodeFG* node) {
+    return node->left == nullptr || node->right == nullptr;
 }
 
 /* 
@@ -196,6 +101,408 @@ NodeFG* AVLTreeFG::minValueNode(NodeFG* node) {
     // current node (the successor node to be deleted) acquires a lock at this point
     return current;
 }
+
+// The following code regarding rebalancing and height fixing was translated 
+// from the Java version of the original algorithm. As the implementation covers
+// some edge cases with rebalancing, we decided to follow the original logic in
+// order to perserve correctness
+// Reference: https://github.com/nbronson/snaptree
+
+/* 
+ * Return label for a node during fixing interval
+ */
+Cond AVLTreeFG::nodeCondition(NodeFG* node) {
+    NodeFG* left = node->left;
+    NodeFG* right = node->right;
+
+    // Unlinking a routing node (a node that marked removed but only get unlinked
+    // when they have zero or one child)
+    if (canUnlink(node) && (node->value == REM)) {
+        return UnlinkRequired;
+    }
+
+    int height = node->height;
+    int heightRepaired = 1 + std::max(height(left), height(right));
+    int balance = getBalance(node);
+
+    // In a strict AVL, balance should never exceed 1 or -1
+    // However, in this given setting, balance at a local point can be affected
+    // by multiple mutations and gets delayed in fixing
+    if ((1 < balance) || (balance < -1)) {
+        return RebalanceRequired;
+    }
+
+    return height == heightRepaired ? NothingRequired : heightRepaired 
+}
+
+/* 
+ * Assign repaired height to a node that requires it
+ */
+NodeFG* fixHeightNoLock(NodeFG* node) {
+    int condition = nodeCondition(node);
+    switch(condition){
+        case RebalanceRequired:
+        case UnlinkRequired:
+            return node;
+        case NothingRequired:
+            return nullptr;
+        default:
+            node->height = condition;
+            return node->parent;
+    }
+}
+
+/*
+ * Right rotate subtree rooted at node
+ */
+NodeFG* AVLTreeFG::rotateRight(NodeFG* parent, NodeFG* node, NodeFG* nL, int hR, int hLL, NodeFG* nLR, int hLR) {
+    // Basic AVL rotation
+    NodeFG* nPL = parent->left;
+
+    // Reader cannot read from this point due to status change
+    assert(nL != nullptr);
+    node->version |= Shrinking;
+    nL->version |= Growing;
+
+    node->left = nLR;
+    nL->right = node;
+
+    // Parent update
+    if (nPL == node) parent->left = nL;
+    else parent->right = nL;
+    nL->parent = parent;
+    node->parent = nL;
+    if (nLR != nullptr) nLR->parent = node;
+
+    // Height update
+    int heightRepaired = std::max(hLR, hR) + 1
+    node->height = heightRepaired;
+    nL->height = std::max(hLL, heightRepaired) + 1;
+
+    // Version update
+    nL->version += GrowCountIncr;
+    node->version += ShrinkCountIncr;
+
+    // Rebalance nodes at higher up levels
+    int balanceNodeCheck = hLR - hR;
+    if (balanceNodeCheck < -1 || 1 < balanceNodeCheck) {
+        // another rotation
+        return node;
+    }
+
+    // might need another rotation at new parent (node left)
+    // now that node has become the right child of left, we need to check the
+    // balance between the left and right child of left node
+    int balanceParentCheck = hLL - heightRepaired;
+    if (balanceParentCheck < -1 || 1 < balanceParentCheck) {
+        return nL;
+    }
+
+    return fixHeightNoLock(parent);
+}
+
+/*
+ * Left rotate subtree rooted at node
+ */ 
+NodeFG* AVLTreeFG::rotateLeft(NodeFG* parent, NodeFG* node, NodeFG* nR, int hL, int hRR, NodeFG* nRL, int hRL) {
+    assert(nL != nullptr);
+    node->version |= Shrinking;
+    nR->version |= Growing;
+
+    NodeFG* nPL = parent->left;
+    node->right = nRL;
+    nR->left = node;
+
+    if (nPL == node) parent->left = nR;
+    else parent->right = nR;
+    nR->parent = parent;
+    node->parent = nR;
+    if (nRL != nullptr) nRL->parent = node;
+
+    int heightRepaired = std::max(hL, hRL) + 1;
+    node->height = heightRepaired;
+    nR->height = std::max(hRR, heightRepaired) + 1;
+
+    nR->version += GrowCountIncr;
+    node->version += ShrinkCountIncr;
+
+    int balanceNodeCheck = hRL - hL;
+    if (balanceNodeCheck < -1 || 1 < balanceNodeCheck) {
+        return node;
+    }
+
+    int balanceParentCheck = hRR - hNRepl;
+    if (balanceParentCheck < -1 || 1 < balanceParentCheck) {
+        return nR;
+    }
+
+    return fixHeightNoLock(parent);
+}
+
+/*
+ * Right-Left rotate subtree rooted at node
+ */
+NodeFG* AVLTreeFG::rotateRightOverLeft(NodeFG* parent, NodeFG* node, NodeFG* nL, int hR, int hLL, NodeFG* nLR, int hLRL) {
+    node->version |= Shrinking;
+    nL->version |= Growing;
+
+    NodeFG* nPL = parent->left;
+    NodeFG* nLRL = nLR->left;
+    NodeFG* nLRR = nLR0->right;
+    int hLRR = height(nLRR);
+
+    node->left = nLRR;
+    if (nLRR != nullptr) {
+        nLRR->parent = node;
+    }
+
+    nL->right = nLRL;
+    if (nLRL != nullptr) {
+        nLRL->parent = nL;
+    }
+
+    nLR->left = nL;
+    nL->parent = nLR;
+    nLR->right = node;
+    node->parent = nLR;
+
+    if (nPL == node) {
+        parent->left = nLR;
+    }
+    else {
+        parent->right = nLR;
+    }
+
+    nLR->parent = parent;
+
+    int heightRepaired = std::max(hLRR, hR) + 1;
+    node->height = heightRepaired;
+    int heightLeftRepaired = std::max(hLL, hLRL) + 1;
+    nL->height = heightLeftRepaired;
+    nLR->height = 1 + std::max(heightRepaired, heightLeftRepaired);
+
+    nL->version += GrowCountIncr;
+    node->version += ShrinkCountIncr;
+
+    int balN = hLRR - hR;
+    if(balN < -1 || balN > 1){
+        return node;
+    }
+
+    int balLR = heightLeftRepaired - heightRepaired;
+    if(balLR < -1 || balLR > 1){
+        return nLR;
+    }
+
+    return fixHeightNoLock(parent);
+}
+
+/*
+ * Left-Right rotate subtree rooted at node
+ */
+NodeFG* AVLTree::rotateLeftOverRight(NodeFG* parent, NodeFG* node, NodeFG* nR, int hL, int hRR, NodeFG* nRL, int hRLR) {
+    assert(nR != nullptr);
+    node->version |= Shrinking;
+    nR->version |= Growing;
+
+    NodeFG* nPL = parent->left;
+    NodeFG* nRLL = nRL->left;
+    NodeFG* nRLR = nRL->right;
+    int hRLL = height(nRLL);
+
+    node->right = nRLL;
+    if (nRLL != nullptr) {
+        nRLL->parent = node;
+    }
+
+    nR->left = nRLR;
+    if (nRLR != nullptr) {
+        nRLR->parent = nR;
+    }
+
+    nRL->right = nR;
+    nR->parent = nRL;
+    nRL->left = node;
+    node->parent = nRL;
+
+    if (nRL == node) {
+        parent->left = nRL;
+    }
+    else {
+        parent->right = nRL;
+    }
+    nRL->parent = parent;
+
+    int heightRepaired = std::max(hL, hRLL) + 1;
+    node->height = heightRepaired;
+    int heightRightRepaired = std::max(hRLR, hRR) + 1;
+    nR->height = heightRightRepaired;
+    nRL->height = std::max(heightRightRepaired, heightRepaired) + 1;
+
+    nR->version += GrowCountIncr;
+    node->version += ShrinkCountIncr;
+
+    int balN = hRLL - hL;
+    if (balN < -1 || balN > 1) {
+        return node;
+    }
+
+    int balRL = heightRightRepaired - heightRepaired;
+    if (balRL < -1 || balRL > 1) {
+        return nRL;
+    }
+    return fixHeightNoLock(parent);
+}
+
+/*
+ * Decide rotation cases
+ */
+NodeFG* AVLTree::rebalanceToRight(NodeFG* parent, NodeFG* node, NodeFG* nL, int hR0) {
+    nL->nodeLock.lock();
+    int hL = nL->height;
+    if (hL - hR0 <= 1) {
+        return node;
+    }
+    else {
+        NodeFG* nLR = nL->right;
+        int hLL0 = height(nL->left);
+        int hLR0 = height(nLR);
+        if (hLL0 >= hLR0) {
+            return rotateRight(parent, node, nL, hR0, hLL0, nLR, hLR0);
+        }
+        else {
+            nLR->nodeLock.lock();
+            int hLR = nLR->height;
+            if (hLL0 >= hLR) {
+                return rotateRight(parent, node, nL, hR0, hLL0, nLR, hLR);
+            }
+            else {
+                int hLRL = height(nLR->left);
+                int b = hLL0 - hLRL;
+                if (-1 <= b && b <= 1 && !((hLL0 == 0 || hLRL == 0) && nL->version == 0)) {
+                    return rotateRightOverLeft(parent, node, nL, hR0, hLL0, nLR, hLRL);
+                } 
+            }
+            nLR->nodeLock.unlock();
+        }
+        return rebalanceToLeft(node, nL, nLR, hLL0);
+    }
+    nL->nodeLock.unlock();
+}
+
+/*
+ * Decide rotation cases
+ */
+NodeFG* rebalanceToLeft(NodeFG* parent, NodeFG* node, NodeFG* nR, int hL0) {
+    nR->nodeLock.lock();
+    if (hL0 - hR >= -1) {
+        return node;
+    }
+    else {
+        NodeFG* nRL = nR->left;
+        int hRL0 = height(nRL);
+        int hRR0 = height(nR->right);
+        if (hRR0 >= hRL0) {
+            return rotateLeft(parent, node, nR, hL0, hRR0, nRL, hRL0);
+        }
+        else {
+            nRL->nodeLock.lock();
+            int hRL = height(nRL);
+            if (hRR0 >= hRL) {
+                return rotateLeft(parent, node, nR, hL0, hRR0, nRL, hRL);
+            }
+            else {
+                int hRLR = height(nRL->right);
+                int b = hRR0 - hRLR;
+                if (-1 <= b && 1 <= b && !((hRR0 == 0 || hRLR == 0) && nR->version == 0)) {
+                    return rotateLeftOverRight(parent, node, nR, hL0, hRR0, nRL, hRLR);
+                }
+            }
+            nRL->nodeLock.unlock();
+            return rebalanceToRight(node, nR, nRL, hRR0);
+        }
+    }
+    nR->nodeLock.lock();
+}
+
+/* 
+ * Fix structural imbalance issues to maintain strict AVL height invariant
+ */
+NodeFG* rebalanceNoLock(NodeFG* parent, NodeFG* node) {
+    NodeFG* nL = node->left;
+    NodeFG* nR = node->right;
+
+    // Unlink (delete structurally) a routing node (deleted logically, with "removed" label)
+    if(canUnlink(node) && (node->value == REM)){
+        assert(node->parent == parent);
+        if(attemptUnlinkNoLock(parent, node)){
+            return fixHeightNoLock(parent);
+        } 
+        else {
+            return node;
+        }
+    }
+    
+    int height = node->height;
+    int heightRepaired = 1 + std::max(height(left), height(right));
+    int balance = getBalance(node);
+
+    if(1 < balance){
+        return rebalanceToRight(parent, node, nL, hR0);
+    } 
+    else if(balance < -1){
+        return rebalanceToLeft(parent, node, nR, hL0);
+    } 
+    else if(height != heightRepaired) {
+        // move up to the parent
+        node->height = heightRepaired;
+        return fixHeightNoLock(parent);
+    } 
+    else {
+        return nullptr;
+    }
+}
+
+/*
+ * Calculate local height of subtree rooted at node and rebalance to maintain 
+ * relaxed height invariant
+ * The fix begins at error node, propagates up to the root, and stops when no
+ * action required
+ */
+void AVLTreeFG::fixHeightAndRebalance(NodeFG* node) {
+    // Performance would be impacted if these reads of height require locks
+    // If one thread fails to repair correctly, there must be a case when
+    // the fild is accesse by only one thread thus being atomic
+    // Therfore, we don't need to use locks or optimistic retry here
+    while (node != nullptr && node->parent != nullptr) {
+        int condition = nodeCondition(node);
+        // No further action needed
+        if (condition == NothingRequired || (node->version == Unlinked)) {
+            return;
+        }
+        // Fix height
+        if ((condition != UnlinkRequired) && (condition != RebalanceRequired)) {
+            node->nodeLock.lock();
+            // Propagate up to parent once finished
+            node = fixHeightNoLock(node);
+            node->nodeLock.unlock();
+        }
+        else {
+            // Rotation needed
+            NodeFG* parent = node->parent;
+            parent->nodeLock.lock();
+            if ((parent->version != Unlinked) && (node->parent == parent)) {
+                node->nodeLock().lock();
+                // Propagate up to parent once finished
+                node = rebalanceNoLock(parent, node);
+                node->nodeLock().unlock();
+            }
+            parent->nodeLock.unlock();
+            // Retry here
+        }
+    }
+}
+
 
 /* 
  * Make a certain thread block until the change bit is not set
@@ -281,7 +588,7 @@ Status AVLTreeFG::attemptSearch(int key, NodeFG* node, int dir, long nodeV) {
         // Target is found
         int dirNext = compare(key, child->key);
         if (dirNext == 0) {
-            if (child->value == ROU) {
+            if (child->value == REM) {
                 // printf("Found a removed node \n");
                 return FAILURE;
             }
@@ -397,7 +704,7 @@ Status AVLTreeFG::attempInsertHelper(int key, NodeFG* node, int dir, long nodeV)
  * Public delete function that wraps the helper
  */ 
 bool AVLTreeFG::deleteNode(int key, NodeFG* node, int dir, long nodeV) {
-    return attemptRemove(key, rootHolder, 1, 0);
+    return attemptDeleteNode(key, rootHolder, 1, 0);
 }
 
 /* 
@@ -442,14 +749,38 @@ Status AVLTreeFG::attemptDeleteNode(int key, NodeFG* node, int dir, long nodeV) 
     }
 }
 
+/*
+ * Attempt to unlink a node (delete structurally) from its parent
+ */
+bool AVLTreeFG::attemptUnlinkNoLock(NodeFG* parent, NodeFG* node){
+    if((parent->left != node && parent->right != node) || (node->parent != parent)){
+        return false;
+    }
+    NodeFG* child = node->left ? node->left : node->right;
+    // Zero child
+    if (parent->left == node) {
+        parent->left = child;
+    }
+    else {
+        parent->right = child;
+    }
+    // One child
+    if (child != nullptr) {
+        child->parent = parent;
+    }
+    node->version = Unlinked; // Delete node
+    node->value = REM;
+    return true;
+}
+
 /* 
  * Deletion of a node falls into two cases: 
  * (1) unlink/remove node if parent has zero or one child
  * (2) made into routing node if parent has two children 
  */
 Status AVLTreeFG::attemptRemoveNode(NodeFG* parent, NodeFG* node) {
-    // Check that node is not a routing node
-    if (node->value == ROU) return FAILURE;
+    // Check that node is not a routing/removed node
+    if (node->value == REM) return FAILURE;
     
     Status prev;
     // Check if the route should be unlinked or converted into routing node 
@@ -462,10 +793,10 @@ Status AVLTreeFG::attemptRemoveNode(NodeFG* parent, NodeFG* node) {
             node->nodeLock.unlock();
             return RETRY;
         }
-        // Make routing node
+        // Make routing/marked removed node
         prev = node->value;
         assert(prev == INT);
-        node->value = ROU;
+        node->value = REM;
         node->nodeLock.unlock()        
     }
     else {
@@ -480,26 +811,14 @@ Status AVLTreeFG::attemptRemoveNode(NodeFG* parent, NodeFG* node) {
         // Locks acquired for both parent and child for the unlinking to happen
         node->nodeLock.lock();
         
-        // Make routing node
+        // Make routing/mark removed node
         prev = node->value;
         assert(prev == INT);
-        node->value = ROU;
+        node->value = REM;
 
         // Verify that unlinking is still possible --> Commit deletion
         if (canUnlink(node)) {
-            // No child
-            NodeFG* child = node->left ? node->left : node->right;
-            if (parent->left == node) {
-                parent->left = child;
-            }
-            else {
-                parent->right = child;
-            }
-            // One child
-            if (child != nullptr) {
-                child->parent = parent;
-            }
-            node->version = Unlinked; // Delete node
+            attemptUnlinkNoLock(parent, child);
         }
         // No need to have a rollback here
         node->nodeLock.unlock();

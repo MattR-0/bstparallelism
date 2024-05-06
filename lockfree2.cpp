@@ -138,9 +138,9 @@ bool AVLTree::insertIfAbsent(int k, int v) {
         else
             continue;
         uint64_t pVerNew = pVer+2;
-        kcas::add(&a->ver, aVer, aVer);
-        kcas::add(&p->ver, pVer, pVerNew);
         kcas::add(&n->parent, (Node*)NULL, p);
+        kcas::add(&a->ver, aVer, aVer,
+        &p->ver, pVer, pVerNew);
         if (kcas::execute()) {
             rebalance(p);
             return true;
@@ -188,8 +188,8 @@ bool AVLTree::eraseTwoChild(Node* n, uint64_t nVer, Node* p, uint64_t pVer) {
         uint64_t srVer = sr->ver;
         if (isMarked(srVer))
             return false;
-        kcas::add(&sr->parent, s, sp);
-        kcas::add(&sr->ver, srVer, srVer+2);
+        kcas::add(&sr->parent, s, sp,
+        &sr->ver, srVer, srVer+2);
     }
     if (sp->right==s)
         kcas::add(&sp->right, s, sr);
@@ -197,10 +197,10 @@ bool AVLTree::eraseTwoChild(Node* n, uint64_t nVer, Node* p, uint64_t pVer) {
         kcas::add(&sp->left, s, sr);
     else
         return false;
-    kcas::add(&n->val, nVal, sVal);
-    kcas::add(&n->key, nKey, sKey);
-    kcas::add(&s->ver, sVer, sVer+1);
-    kcas::add(&sp->ver, spVer, spVer+2);
+    kcas::add(&n->val, nVal, sVal,
+    &n->key, nKey, sKey,
+    &s->ver, sVer, sVer+1,
+    &sp->ver, spVer, spVer+2);
     if (sp!=n) // n and sp can be the same Node
         kcas::add(&n->ver, nVer, nVer+2);
     if (kcas::execute()) {
@@ -223,8 +223,8 @@ bool AVLTree::eraseSimple(int key, Node* n, uint64_t nVer, Node* p, uint64_t pVe
         uint64_t rVer = r->ver;
         if (isMarked(rVer))
             return false;
-        kcas::add(&r->parent, n, p);
-        kcas::add(&r->ver, rVer, rVer+2);
+        kcas::add(&r->parent, n, p,
+        &r->ver, rVer, rVer+2);
     }
     if (p->right==n)
         kcas::add(&p->right, n, r);
@@ -232,8 +232,8 @@ bool AVLTree::eraseSimple(int key, Node* n, uint64_t nVer, Node* p, uint64_t pVe
         kcas::add(&p->left, n, r);
     else
         return false;
-    kcas::add(&p->ver, pVer, pVer+2);
-    kcas::add(&n->ver, nVer, nVer+1);
+    kcas::add(&p->ver, pVer, pVer+2,
+    &n->ver, nVer, nVer+1);
     if (kcas::execute()) {
         rebalance(p);
         return true;
@@ -241,25 +241,43 @@ bool AVLTree::eraseSimple(int key, Node* n, uint64_t nVer, Node* p, uint64_t pVe
     return false;
 }
 
+// std::tuple<Node*, uint64_t, Node*, uint64_t, bool> AVLTree::getSuccessor(Node* n) {
+//     if (!n) return std::make_tuple(nullptr, 0, nullptr, 0, false);
+//     if (n->right.getValue() != nullptr) {
+//         Node* succ = n->right.getValue();
+//         uint64_t succVer = succ->ver.getValue();
+//         while (succ->left.getValue() != nullptr) {
+//             succ = succ->left.getValue();
+//             succVer = succ->ver.getValue();
+//         }
+//         return std::make_tuple(succ, succVer, n, n->ver.getValue(), true);
+//     }
+//     Node* parent = n->parent.getValue();
+//     uint64_t parentVer = parent ? parent->ver.getValue() : 0;
+//     while (parent != nullptr && n == parent->right.getValue()) {
+//         n = parent;
+//         parent = parent->parent.getValue();
+//         parentVer = parent ? parent->ver.getValue() : 0;
+//     }
+//     return std::make_tuple(parent, parentVer, n, n->ver.getValue(), parent != nullptr);
+// }
+
 std::tuple<Node*, uint64_t, Node*, uint64_t, bool> AVLTree::getSuccessor(Node* n) {
-    if (!n) return std::make_tuple(nullptr, 0, nullptr, 0, false);
-    if (n->right.getValue() != nullptr) {
-        Node* succ = n->right.getValue();
-        uint64_t succVer = succ->ver.getValue();
-        while (succ->left.getValue() != nullptr) {
-            succ = succ->left.getValue();
-            succVer = succ->ver.getValue();
-        }
-        return std::make_tuple(succ, succVer, n, n->ver.getValue(), true);
+    Node* parent = n;
+    Node* succ = n->right;
+    if (!succ) return std::make_tuple(nullptr, 0, nullptr, 0, false);
+    uint64_t parentVer = parent->ver;
+    uint64_t succVer = succ->ver;
+    while (succ->left != nullptr) {
+        parent = succ;
+        parentVer = succVer;
+        succ = succ->left;
+        succVer = succ->ver;
     }
-    Node* parent = n->parent.getValue();
-    uint64_t parentVer = parent ? parent->ver.getValue() : 0;
-    while (parent != nullptr && n == parent->right.getValue()) {
-        n = parent;
-        parent = parent->parent.getValue();
-        parentVer = parent ? parent->ver.getValue() : 0;
+    if (isMarked(succVer) || isMarked(parentVer)) {
+        return std::make_tuple(nullptr, 0, nullptr, 0, false);
     }
-    return std::make_tuple(parent, parentVer, n, n->ver.getValue(), parent != nullptr);
+    return std::make_tuple(succ, succVer, parent, parentVer, true);
 }
 
 void AVLTree::rebalance(Node* n) {
@@ -372,8 +390,8 @@ int AVLTree::fixHeight(Node* n, uint64_t nVer) {
     else
         return 0; // FAILURE
     uint64_t nVerNew = nVer + 2;
-    kcas::add(&n->height, oldHeight, newHeight);
-    kcas::add(&n->ver, nVer, nVerNew);
+    kcas::add(&n->height, oldHeight, newHeight,
+    &n->ver, nVer, nVerNew);
     if (kcas::execute())
          return 1; // SUCCESS
     return 0; // FAILURE
@@ -394,8 +412,8 @@ bool AVLTree::rotateRight(Node* p, uint64_t pVer, Node* n, uint64_t nVer, Node* 
         lrHeight = lr->height;
         if (isMarked(lrVer))
             return false;
-        kcas::add(&lr->parent, l, n);
-        kcas::add(&lr->ver, lrVer, lrVer + 2);
+        kcas::add(&lr->parent, l, n,
+        &lr->ver, lrVer, lrVer + 2);
     }
     Node* ll = l->left;
     int llHeight = 0;
@@ -416,15 +434,15 @@ bool AVLTree::rotateRight(Node* p, uint64_t pVer, Node* n, uint64_t nVer, Node* 
     int oldLHeight = l->height;
     int newNHeight = 1 + std::max(lrHeight, rHeight);
     int newLHeight = 1 + std::max(llHeight, newNHeight);
-    kcas::add(&l->parent, n, p);
-    kcas::add(&n->left, l, lr);
-    kcas::add(&l->right, lr, n);
-    kcas::add(&n->parent, p, l);
-    kcas::add(&n->height, oldNHeight, newNHeight);
-    kcas::add(&l->height, oldLHeight, newLHeight);
-    kcas::add(&p->ver, pVer, pVer + 2);
-    kcas::add(&n->ver, nVer, nVer + 2);
-    kcas::add(&l->ver, lVer, lVer + 2);
+    kcas::add(&l->parent, n, p,
+    &n->left, l, lr,
+    &l->right, lr, n,
+    &n->parent, p, l,
+    &n->height, oldNHeight, newNHeight,
+    &l->height, oldLHeight, newLHeight,
+    &p->ver, pVer, pVer + 2,
+    &n->ver, nVer, nVer + 2,
+    &l->ver, lVer, lVer + 2);
     if (kcas::execute())
         return true;
     return false;
@@ -445,8 +463,8 @@ bool AVLTree::rotateLeft(Node* p, uint64_t pVer, Node* n, uint64_t nVer, Node* l
         rlHeight = rl->height;
         if (isMarked(rlVer))
             return false;
-        kcas::add(&rl->parent, r, n);
-        kcas::add(&rl->ver, rlVer, rlVer + 2);
+        kcas::add(&rl->parent, r, n,
+        &rl->ver, rlVer, rlVer + 2);
     }
     Node* rr = r->right;
     int rrHeight = 0;
@@ -467,15 +485,15 @@ bool AVLTree::rotateLeft(Node* p, uint64_t pVer, Node* n, uint64_t nVer, Node* l
     int oldRHeight = r->height;
     int newNHeight = 1 + std::max(rlHeight, lHeight);
     int newRHeight = 1 + std::max(rrHeight, newNHeight);
-    kcas::add(&r->parent, n, p);
-    kcas::add(&n->right, r, rl);
-    kcas::add(&r->left, rl, n);
-    kcas::add(&n->parent, p, r);
-    kcas::add(&n->height, oldNHeight, newNHeight);
-    kcas::add(&r->height, oldRHeight, newRHeight);
-    kcas::add(&p->ver, pVer, pVer + 2);
-    kcas::add(&n->ver, nVer, nVer + 2);
-    kcas::add(&r->ver, rVer, rVer + 2);
+    kcas::add(&r->parent, n, p,
+    &n->right, r, rl,
+    &r->left, rl, n,
+    &n->parent, p, r,
+    &n->height, oldNHeight, newNHeight,
+    &r->height, oldRHeight, newRHeight,
+    &p->ver, pVer, pVer + 2,
+    &n->ver, nVer, nVer + 2,
+    &r->ver, rVer, rVer + 2);
     if (kcas::execute())
         return true;
     return false;
@@ -496,8 +514,8 @@ bool AVLTree::rotateLeftRight(Node* p, uint64_t pVer, Node* n, uint64_t nVer, No
         lrlHeight = lrl->height;
         if (isMarked(lrlVer))
             return false;
-        kcas::add(&lrl->parent, lr, l);
-        kcas::add(&lrl->ver, lrlVer, lrlVer + 2);
+        kcas::add(&lrl->parent, lr, l,
+        &lrl->ver, lrlVer, lrlVer + 2);
     }
     Node* lrr = lr->right;
     int lrrHeight = 0;
@@ -506,8 +524,8 @@ bool AVLTree::rotateLeftRight(Node* p, uint64_t pVer, Node* n, uint64_t nVer, No
         lrrHeight = lrr->height;
         if (isMarked(lrrVer))
             return false;
-        kcas::add(&lrr->parent, lr, n);
-        kcas::add(&lrr->ver, lrrVer, lrrVer + 2);
+        kcas::add(&lrr->parent, lr, n,
+        &lrr->ver, lrrVer, lrrVer + 2);
     }
     int rHeight = 0;
     if (r!=NULL) {
@@ -530,20 +548,20 @@ bool AVLTree::rotateLeftRight(Node* p, uint64_t pVer, Node* n, uint64_t nVer, No
     int newNHeight = 1 + std::max(lrrHeight, rHeight);
     int newLHeight = 1 + std::max(llHeight, lrlHeight);
     int newLRHeight = 1 + std::max(newNHeight, newLHeight);
-    kcas::add(&lr->parent, l, p);
-    kcas::add(&lr->left, lrl, l);
-    kcas::add(&l->parent, n, lr);
-    kcas::add(&lr->right, lrr, n);
-    kcas::add(&n->parent, p, lr);
-    kcas::add(&l->right, lr, lrl);
-    kcas::add(&n->left, l, lrr);
-    kcas::add(&n->height, oldNHeight, newNHeight);
-    kcas::add(&l->height, oldLHeight, newLHeight);
-    kcas::add(&lr->height, oldLRHeight, newLRHeight);
-    kcas::add(&lr->ver, lrVer, lrVer + 2);
-    kcas::add(&p->ver, pVer, pVer + 2);
-    kcas::add(&n->ver, nVer, nVer + 2);
-    kcas::add(&l->ver, lVer, lVer + 2);
+    kcas::add(&lr->parent, l, p,
+    &lr->left, lrl, l,
+    &l->parent, n, lr,
+    &lr->right, lrr, n,
+    &n->parent, p, lr,
+    &l->right, lr, lrl,
+    &n->left, l, lrr,
+    &n->height, oldNHeight, newNHeight,
+    &l->height, oldLHeight, newLHeight,
+    &lr->height, oldLRHeight, newLRHeight,
+    &lr->ver, lrVer, lrVer + 2,
+    &p->ver, pVer, pVer + 2,
+    &n->ver, nVer, nVer + 2,
+    &l->ver, lVer, lVer + 2);
     if (kcas::execute())
         return true;
     return false;
@@ -564,8 +582,8 @@ bool AVLTree::rotateRightLeft(Node* p, uint64_t pVer, Node* n, uint64_t nVer, No
         rlrHeight = rlr->height;
         if (isMarked(rlrVer))
             return false;
-        kcas::add(&rlr->parent, rl, r);
-        kcas::add(&rlr->ver, rlrVer, rlrVer + 2);
+        kcas::add(&rlr->parent, rl, r,
+        &rlr->ver, rlrVer, rlrVer + 2);
     }
     Node* rll = rl->left;
     int rllHeight = 0;
@@ -574,8 +592,8 @@ bool AVLTree::rotateRightLeft(Node* p, uint64_t pVer, Node* n, uint64_t nVer, No
         rllHeight = rll->height;
         if (isMarked(rllVer))
             return false;
-        kcas::add(&rll->parent, rl, n);
-        kcas::add(&rll->ver, rllVer, rllVer + 2);
+        kcas::add(&rll->parent, rl, n,
+        &rll->ver, rllVer, rllVer + 2);
     }
     int lHeight = 0;
     if (l!=NULL) {
@@ -598,20 +616,20 @@ bool AVLTree::rotateRightLeft(Node* p, uint64_t pVer, Node* n, uint64_t nVer, No
     int newNHeight = 1 + std::max(rllHeight, lHeight);
     int newRHeight = 1 + std::max(rrHeight, rlrHeight);
     int newRLHeight = 1 + std::max(newNHeight, newRHeight);
-    kcas::add(&rl->parent, r, p);
-    kcas::add(&rl->right, rlr, r);
-    kcas::add(&r->parent, n, rl);
-    kcas::add(&rl->left, rll, n);
-    kcas::add(&n->parent, p, rl);
-    kcas::add(&r->left, rl, rlr);
-    kcas::add(&n->right, r, rll);
-    kcas::add(&n->height, oldNHeight, newNHeight);
-    kcas::add(&r->height, oldRHeight, newRHeight);
-    kcas::add(&rl->height, oldRLHeight, newRLHeight);
-    kcas::add(&rl->ver, rlVer, rlVer + 2);
-    kcas::add(&p->ver, pVer, pVer + 2);
-    kcas::add(&n->ver, nVer, nVer + 2);
-    kcas::add(&r->ver, rVer, rVer + 2);
+    kcas::add(&rl->parent, r, p,
+    &rl->right, rlr, r,
+    &r->parent, n, rl,
+    &rl->left, rll, n,
+    &n->parent, p, rl,
+    &r->left, rl, rlr,
+    &n->right, r, rll,
+    &n->height, oldNHeight, newNHeight,
+    &r->height, oldRHeight, newRHeight,
+    &rl->height, oldRLHeight, newRLHeight,
+    &rl->ver, rlVer, rlVer + 2,
+    &p->ver, pVer, pVer + 2,
+    &n->ver, nVer, nVer + 2,
+    &r->ver, rVer, rVer + 2);
     if (kcas::execute())
         return true;
     return false;

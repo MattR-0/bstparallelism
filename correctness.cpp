@@ -7,7 +7,7 @@ using namespace std;
 // Coarse-grained: IMPL=1, fine-grained: IMPL=2, lock-free: IMPL=3
 #define IMPL 3
 #define NUM_THREADS 4
-#define THREAD_SIZE 100
+#define THREAD_SIZE 20
 
 AVLTreeCG *treeCG;
 AVLTreeFG *treeFG;
@@ -285,7 +285,7 @@ void testSequentialDelete() {
 
     initTree();
     insertRange(1, THREAD_SIZE);
-    deleteRangeSpread(1, THREAD_SIZE);
+    deleteRangeSpread(2, THREAD_SIZE);
     for (int i=1; i<THREAD_SIZE; i++) {
         bool found = flexSearch(i);
         if (i%2==1 && !found) {

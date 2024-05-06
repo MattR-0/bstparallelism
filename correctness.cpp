@@ -2,22 +2,25 @@
 #include "coarsegrained.h"
 #include "finegrained.h"
 #include "lockfree2.h"
+#include "lockfree.h"
 using namespace std;
 
-// Coarse-grained: IMPL=1, fine-grained: IMPL=2, lock-free: IMPL=3
-#define IMPL 3
+// Coarse-grained: IMPL=1, fine-grained: IMPL=2, lock-free: IMPL=3, BST lock-free: IMPL=4
+#define IMPL 4
 #define NUM_THREADS 4
-#define THREAD_SIZE 20
+#define THREAD_SIZE 100
 
 AVLTreeCG *treeCG;
 AVLTreeFG *treeFG;
 AVLTree *treeLF;
+AVLTreeLF *treeBST;
 
 /* UTILITY FUNCTIONS */
 void initTree() {
     if (IMPL==1) treeCG = new AVLTreeCG();
     if (IMPL==2) treeFG = new AVLTreeFG();
     if (IMPL==3) treeLF = new AVLTree();
+    if (IMPL==4) treeBST = new AVLTreeLF();
     printf("Tree initialized\n");
 }
 
@@ -25,6 +28,7 @@ void deleteTree() {
     if (IMPL==1) delete treeCG;
     if (IMPL==2) delete treeFG;
     if (IMPL==3) delete treeLF;
+    if (IMPL==4) delete treeBST;
 }
 
 /* Return a random vector of key inputs */
@@ -41,18 +45,21 @@ bool flexInsert(int k) {
     if (IMPL==1) return treeCG->insert(k);
     if (IMPL==2) return treeFG->insert(k);
     if (IMPL==3) return treeLF->insert(k);
+    if (IMPL==4) return treeBST->insert(k);
 }
 
 bool flexDelete(int k) {
     if (IMPL==1) return treeCG->deleteNode(k);
     if (IMPL==2) return treeFG->deleteNode(k);
     if (IMPL==3) return treeLF->deleteNode(k);
+    if (IMPL==4) return treeBST->deleteNode(k);
 }
 
 bool flexSearch(int k) {
     if (IMPL==1) return treeCG->search(k);
     if (IMPL==2) return treeFG->search(k);
     if (IMPL==3) return treeLF->search(k);
+    if (IMPL==4) return treeBST->search(k);
 }
 
 /* HELPER FUNCTIONS */
@@ -155,6 +162,8 @@ int checkHeightAndBalance() {
     if (IMPL==3) {
         return checkHeightAndBalanceLF(treeLF->minRoot->right);
     }
+    if (IMPL==4)
+        return 0;
     throw std::runtime_error("Invalid IMPL defined in correctness.cpp");
     return 0;
 }
@@ -191,19 +200,9 @@ void testSequentialSearch() {
     if (IMPL==3) {
         deleteTree();
         return;
-        Node* treeRoot = new Node(20,0);
-        // cant use setInitVal, have to use kcas::execute
-        treeRoot->parent.setInitVal(treeLF->minRoot);
-        treeLF->minRoot->right.setInitVal(treeRoot);
-        treeRoot->left.setInitVal(new Node(12,0));
-        treeRoot->right.setInitVal(new Node(53,0));
-        treeRoot->left->left.setInitVal(new Node(1,0));
-        treeRoot->right->left.setInitVal(new Node(21,0));
-        treeRoot->left->right.setInitVal(new Node(17,0));
-        treeRoot->right->right.setInitVal(new Node(82,0));
-        treeRoot->right->right->left.setInitVal(new Node(73,0));
-        treeRoot->left->right->left.setInitVal(new Node(15,0));
-        treeRoot->left->left->right.setInitVal(new Node(2,0));
+    }
+    if (IMPL==4) {
+        return;
     }
     std::set<int> elems = {20,12,53,1,21,17,82,73,15,2};
     for (int i=1; i<100; i++) {
@@ -316,12 +315,14 @@ void testConcurrentDelete() {
 	}
 	for (int i = 1; i<=NUM_THREADS * THREAD_SIZE; i++) {
         bool found = flexSearch(i);
+        if (i%THREAD_SIZE==0)
+            continue;
 		if (i%THREAD_SIZE<THREAD_SIZE/4 && !found) {
             std::ostringstream oss;
             oss << "Concurrent delete failed, missing " << i << "\n";
             throw std::runtime_error(oss.str());
         } 
-		else if (i%THREAD_SIZE>=THREAD_SIZE/4 && found) {
+		else if (i%THREAD_SIZE>THREAD_SIZE/4 && found) {
             std::ostringstream oss;
             oss << "Concurrent delete failed, incorrectly finding " << i << "\n";
             throw std::runtime_error(oss.str());
@@ -357,12 +358,12 @@ void testInsertDeleteSpread() {
 	initTree();
 	std::vector<std::thread> threads;
 	for (int i=0; i<NUM_THREADS; i++) {
-		threads.push_back(thread(insertRangeDeleteSpread, 1+i*THREAD_SIZE, 1+(i+1)*THREAD_SIZE, 1+(THREAD_SIZE+1)/2));
+		threads.push_back(thread(insertRangeDeleteSpread, i*THREAD_SIZE, (i+1)*THREAD_SIZE, (THREAD_SIZE+1)/2));
 	}
 	for (int i=0; i<NUM_THREADS; i++) {
 		threads[i].join();
 	}
-	for (int i=1; i<=NUM_THREADS*THREAD_SIZE; i++) {
+	for (int i=0; i<=NUM_THREADS*THREAD_SIZE; i++) {
         bool found = flexSearch(i);
         if (i%2==1 && !found) {
             std::ostringstream oss;

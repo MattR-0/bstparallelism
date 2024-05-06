@@ -675,7 +675,7 @@ public:
     casword<int> height;
     casword<int> val;
     
-    Node(int k, int v);
+    Node(int k, int v, Node* p);
 };
 
 class AVLTree {

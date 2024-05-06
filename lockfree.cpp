@@ -1,199 +1,237 @@
-#include <lockfree.h>
+#include "lockfree.h"
+#include <stdint.h>
+#include <stdio.h>
 
 #define FLAG_MASK 3UL
 #define NULL_MASK 1UL
+#define GET_FLAG(op) ((uintptr_t)op & FLAG_MASK)
+#define SET_FLAG(op, flag) ((Operation*) ((uintptr_t)op | flag))
+#define DE_FLAG(op) ((Operation*) (((uintptr_t)op >> 2) << 2))
+#define IS_NULL(node) (((uintptr_t) node & NULL_MASK) == 1UL)
+#define SET_NULL(node) ((NodeBST*) ((uintptr_t) node | NULL_MASK))
 
-// Operation marking status
-enum opFlag {
-    NONE, MARK, ROTATE, INSERT, RELOCATE
+enum op_flag {
+    NONE, MARK, CHILDCAS, RELOCATE
 };
 
-Operation* AVLTreeLF::flag(Operation* op, int status) {
-    return (Operation*) ((uintptr_t)op | status);
+enum findVals {
+    FOUND, NOTFOUND_L, NOTFOUND_R, ABORT
+};
+
+enum relocateVals {
+    ONGOING, SUCCEED, FAILED
+};
+
+NodeBST::NodeBST() : key(0) {
+    op = NULL;
+    left = NULL;
+    right = NULL;
+    op = SET_FLAG(op, NONE);
+    left = SET_NULL(left);
+    right = SET_NULL(right);
 }
 
-Operation* AVLTreeLF::getFlag(Operation* op) {
-    return (Operation*) ((uintptr_t)op & FLAG_MASK);
+NodeBST::NodeBST(int k) : key(k) {
+    op = NULL;
+    left = NULL;
+    right = NULL;
+    op = SET_FLAG(op, NONE);
+    left = SET_NULL(left);
+    right = SET_NULL(right);
 }
 
-Operation* AVLTreeLF::unflag(Operation* op) {
-    return (Operation*)(((uintptr_t)op >> 2) << 2);
+AVLTreeLF::AVLTreeLF() {
+    root = *(new NodeBST(-1));
 }
 
-Operation* AVLTreeLF::setNull(Operation* op) {
-    return (NodeLF*)((uintptr_t) node | NULL_MASK);
+AVLTreeLF::~AVLTreeLF() {
+
 }
 
-bool AVLTreeLF::search(int k, NodeLF* node) {
-    bool result = false;
-    while (node!=nullptr) {
-        if (k<node->key)
-            node = node->left;
-        else if (k>node->key)
-            node = node->right;
-        else {
-            result = true;
-            break;
-        }
-    }
-    return result;
+ChildCASOp::ChildCASOp(bool is_left, NodeBST* old, NodeBST* new_n) {
+    this->is_left = is_left;
+    expected = old;
+    update = new_n;
 }
 
-int AVLTreeLF::seek(int key, NodeLF** parent, Operation** parentOp, NodeLF** node, Operation** nodeOp, NodeLF* auxRoot) {
-    NodeLF* next;
-    int result;
-    bool retry = false;
+RelocateOp::RelocateOp(NodeBST* curr, Operation* curr_op, int curr_key, int new_key) {
+    state = ONGOING;
+    dest = curr;
+    dest_op = curr_op;
+    key_to_remove = curr_key;
+    key_to_put = new_key;
+}
+
+int AVLTreeLF::find(int k, NodeBST*& parent, Operation*& parent_op, NodeBST*& curr, Operation*& curr_op, NodeBST* root) {
+    int result, current_key;
+    NodeBST* next, *last_right;
+    Operation* last_right_op;
+    bool is_occupied = false;
+
     while (true) {
-        result = -1;
-        *node = auxRoot;
-        *nodeOp = (*node)->op;
-        if (getFlag(*nodeOp)!=NONE) {
-            if (auxRoot==root) {
-                helpInsert(unflag(*nodeOp), *node);
+        result = NOTFOUND_R;
+        curr = root;
+        curr_op = curr->op;
+        if (GET_FLAG(curr_op) != NONE) {
+            if (root == &this->root) {
+                helpChildCAS(DE_FLAG(curr_op), curr);
                 continue;
-            } else
-                return -2;
+            }
+            else return ABORT;
         }
-        next = (*node)->right;
-        while (next!=nullptr) {
-            *parent = *node
-            *parentOp = *nodeOp;
-            *node = next;
-            *nodeOp = (*node)->op;
-            if (getFlag(nodeOp) != NONE) {
-                helpSeek(*parent, *parentOp, *node, *nodeOp);
-                retry = true;
+        next = curr->right;
+        last_right = curr;
+        last_right_op = curr_op;
+
+        while (!IS_NULL(next)) {
+            parent = curr;
+            parent_op = curr_op;
+            curr = next;
+            curr_op = next->op;
+            if (GET_FLAG(curr_op) != NONE) {
+                help(parent, parent_op, curr, curr_op);
+                is_occupied = true;
                 break;
             }
-            int nodeKey = (*node)->key;
-            if (key<nodeKey) {
-                next = (*node)->left;
-                result = -1;
-            } else if (key>nodeKey) {
-                next = (*node)->right;
-                result = 1;
-            } else
-                return 0;
+            current_key = curr->key;
+            if (k < current_key) {
+                result = NOTFOUND_L;
+                next = curr->left;
+            }
+            else if (k > current_key) {
+                result = NOTFOUND_R;
+                next = curr->right;
+                last_right = curr;
+                last_right_op = curr_op;
+            }
+            else {
+                result = FOUND;
+                break;
+            }
         }
-        if (!retry)
-            return result;
-        else
-            retry = false;
+
+        if (is_occupied) {
+            is_occupied = false;
+            continue;
+        }
+        if ((result == FOUND || last_right_op == last_right->op) && curr_op == curr->op) break;
     }
     return result;
 }
 
-bool AVLTreeLF::insert(int key) {
-    NodeLF* parent;
-    NodeLF* current;
-    NodeLF* newNode = nullptr;
-    Operation* parentOp;
-    Operation* currentOp;
-    Operation* casOp;
-    int result = 0;
-    while (true) {
-        result = seek(key, &parent, &parentOp, &current, &currentOp, root);
-        if (result==0)
+bool AVLTreeLF::search(int k) {
+    NodeBST* parent, *curr;
+    Operation* parent_op, *curr_op;
+    return find(k, parent, parent_op, curr, curr_op, &root) == FOUND;
+}
+
+bool AVLTreeLF::insert(int k) {
+    NodeBST* parent, *curr, *new_node;
+    Operation* parent_op, *curr_op, *cas_op;
+    int result;
+
+    while(true) {
+        result = find(k, parent, parent_op, curr, curr_op, &root);
+        if (result == FOUND)
             return false;
-        if (newNode==nullptr)
-            newNode = new NodeLF(key);
-        bool isLeft = (result==-1);
-        NodeLF* oldNode = isLeft ? current->left : current->right;
-        casOp = new InsertOp(isLeft, oldNode, newNode);
-        if (__sync_bool_compare_and_swap(&current->op, currentOp, flag(casOp, INSERT)) {
-            helpInsert(casOp, current);
+        new_node = new NodeBST(k);
+        bool isLeft = (result == NOTFOUND_L);
+        NodeBST* old = isLeft ? curr->left : curr->right;
+        cas_op = new ChildCASOp(isLeft, old, new_node);
+        if (__sync_bool_compare_and_swap(&curr->op, curr_op, SET_FLAG(cas_op, CHILDCAS))) {
+            helpChildCAS(cas_op, curr);
             return true;
         }
     }
 }
 
-bool AVLTreeLF::deleteNode(int key) {
-    NodeLF* parent;
-    NodeLF* node;
-    NodeLF* newNode;
-    Operation* parentOp;
-    Operation* nodeOp;
-    Operation* newNodeOp;
+bool AVLTreeLF::deleteNode(int k) {
+    NodeBST* parent, *curr, *replace;
+    Operation* parent_op, *curr_op, *replace_op, *relocate_op;
+
     while (true) {
-        int result = seek(key, &parent, &parentOp, &node, &nodeOp, root);
-        if (result!=0)
+        if (find(k, parent, parent_op, curr, curr_op, &root) != FOUND)
             return false;
-        if (node->left==nullptr || node->right==nullptr) {
-            if (__sync_bool_compare_and_swap(&node->op, nodeOp, SET_FLAG(nodeOp, MARK))) {
-                helpMarked(parent, parentOp, node);
+
+        if (IS_NULL(curr->left) || IS_NULL(curr->right)) {
+            if (__sync_bool_compare_and_swap(&curr->op, curr_op, SET_FLAG(curr_op, MARK))) {
+                helpMarked(parent, parent_op, curr);
                 return true;
             }
         }
         else {
-            if (seek(key, parent, parentOp, newNode, newNodeOp, node) == -2 || (node->op!=nodeOp))
+            if (find(k, parent, parent_op, replace, replace_op, curr) == ABORT || (curr->op != curr_op))
                 continue;
-            RelocateOp relocateOp = new RelocateOp(node, nodeOp, key, newNode->key);
-            if (__sync_bool_compare_and_swap(&newNode->op, newNodeOp, flag(relocateOp, RELOCATE))) {
-                if (helpRelocate(relocateOp, parent, parentOp, newNode))
+            relocate_op = new RelocateOp(curr, curr_op, k, replace->key);
+            if (__sync_bool_compare_and_swap(&replace->op, replace_op, SET_FLAG(relocate_op, RELOCATE))) {
+                if (helpRelocate(relocate_op, parent, parent_op, replace))
                     return true;
             }
         }
     }
 }
 
-void AVLTreeLF::helpSeek(NodeLF* parent, Operation* parentOp, NodeLF* node, NodelF* nodeOp) {
-    if (getFlag(nodeOp)==INSERT)
-        helpInsert(unflag(nodeOp), node);
-    else if (getFlag(parentOp)==ROTATE)
-        helpRotate((unflag(parentOp), parent, node, parentOp->child);
-    else if (getFlag(nodeOp)==MARK)
-        helpMarked(parent, parentOp, node);
+void AVLTreeLF::help(NodeBST* parent, Operation* parent_op, NodeBST* curr, Operation* curr_op) {
+    if (GET_FLAG(curr_op) == CHILDCAS)
+        helpChildCAS(DE_FLAG(curr_op), curr);
+    else if (GET_FLAG(curr_op) == RELOCATE)
+        helpRelocate(DE_FLAG(curr_op), parent, parent_op, curr);
+    else if (GET_FLAG(curr_op) == MARK)
+        helpMarked(parent, parent_op, curr);
 }
 
-void AVLTreeLF::helpInsert(Operation* op, NodeLF* dest) {
-    InsertOp* insertOp = (InsertOp *)op;
-    volatile NodeLF** address = nullptr;
-    if (insertOp->isLeft)
-        address = (nodeLF**)&(dest->left);
-    else
-        address = (nodeLF**)&(dest->right);
-    __sync_bool_compare_and_swap(address, insertOp->expected, insertOp->update);
-    __sync_bool_compare_and_swap(&(dest->op), flag(op, INSERT), flag(op, NONE));
+void AVLTreeLF::helpMarked(NodeBST* parent, Operation* parent_op, NodeBST* curr) {
+    NodeBST* tmp;
+    if (IS_NULL(curr->left)) {
+        if (IS_NULL(curr->right)) tmp = SET_NULL(curr);
+        else tmp = curr->right;
+    }
+    else tmp = curr->left;
+
+    bool is_left = (curr == parent->left);
+    Operation* cas_op = new ChildCASOp(is_left, curr, tmp);
+
+    if (__sync_bool_compare_and_swap(&parent->op, parent_op, SET_FLAG(cas_op, CHILDCAS))) {
+        helpChildCAS(cas_op, parent);
+    }
 }
 
-void helpMarked(NodeLF* parent, Operation* parentOp, NodeLF* node) {
-    NodeLF* child, address;
-    if (node->left==nullptr)
-        if (node->right==nullptr)
-            child = (NodeLF*)setNull(node);
-        else
-            child = node->right;
-    else
-        child = node->left;
-    Operation* casOp = new InsertOp((node==parent->left), node, child);
-    if (__sync_bool_compare_and_swap(&parent->op, parentOp, setFlag(casOp, INSERT)))
-        helpInsert(casOp, parent);
-    else
-        delete casOp;
+void AVLTreeLF::helpChildCAS(Operation* op, NodeBST* dest) {
+    ChildCASOp* child_op = (ChildCASOp *) op;
+    NodeBST* volatile* addr = child_op->is_left ? &dest->left : &dest->right;
+    __sync_bool_compare_and_swap(addr, child_op->expected, child_op->update);
+    __sync_bool_compare_and_swap(&dest->op, SET_FLAG(op, CHILDCAS), SET_FLAG(op, NONE));
 }
 
-bool helpRelocate(RelocateOp* op, Node* pred, Operation* predOp, Node* curr) {
-    int seenState = op->state;
-    if (seenState == ONGOING) {
-        Operation* seenOp = VCAS(&op->dest->op, op->destOp, FLAG(op, RELOCATE));
-        if ((seenOp == op->destOp) || (seenOp == FLAG(op, RELOCATE))) {
-            CAS(&op->state, ONGOING, SUCCESSFUL);
-            seenState = SUCCESSFUL;
-        } else {
-            seenState = VCAS(&op->state, ONGOING, FAILED);
+bool AVLTreeLF::helpRelocate(Operation* op, NodeBST* parent, Operation* parent_op, NodeBST* curr) {
+    RelocateOp* relo_op = (RelocateOp *)op;
+    bool result;
+    int state = relo_op->state;
+
+    if (state == ONGOING) {
+        __sync_bool_compare_and_swap(&relo_op->dest->op, relo_op->dest_op, SET_FLAG(relo_op, RELOCATE));
+        Operation* seen_op = relo_op->dest->op;
+        if ((seen_op == relo_op->dest_op) || (seen_op == SET_FLAG(relo_op, RELOCATE))) {
+            __sync_bool_compare_and_swap(&relo_op->state, ONGOING, SUCCEED);
+            state = SUCCEED;
+        }
+        else {
+            __sync_bool_compare_and_swap(&relo_op->state, ONGOING, FAILED);
+            state = relo_op->state;
         }
     }
-    if (seenState == SUCCESSFUL) {
-        CAS(&op->dest->key, removeKey, replaceKey);
-        CAS(&op->dest->op, FLAG(op, RELOCATE), FLAG(op, NONE));
+    if (state == SUCCEED) {
+        __sync_bool_compare_and_swap(&relo_op->dest->key, relo_op->key_to_remove, relo_op->key_to_put);
+        __sync_bool_compare_and_swap(&relo_op->dest->op, SET_FLAG(relo_op, RELOCATE), SET_FLAG(relo_op, NONE));
     }
-    bool result = (seenState == SUCCESSFUL);
-    if (op->dest == curr)
-        return result;
-    CAS(&curr->op, FLAG(op, RELOCATE), FLAG(op, result ? MARK : NONE));
+
+    result = (state == SUCCEED);
+    if (relo_op->dest == curr) return result;
+
+    __sync_bool_compare_and_swap(&curr->op, SET_FLAG(relo_op, RELOCATE), SET_FLAG(relo_op, result ? MARK : NONE));
     if (result) {
-    if (op->dest == pred) predOp = FLAG(op, NONE);
-        helpMarked(pred, predOp, curr);
+        if (relo_op->dest == parent) parent_op = SET_FLAG(relo_op, NONE);
+        helpMarked(parent, parent_op, curr);
     }
     return result;
 }

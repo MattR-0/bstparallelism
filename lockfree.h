@@ -1,62 +1,41 @@
-#include <iostream>
-#include <vector>
-#include <mutex>
+class Operation {
 
-class Operation {};
-
-class NodeLF {
-public:
-    volatile int key;
-    volatile NodeLF* left;
-    volatile NodeLF* right;
-    volatile int height;
-    volatile int lh;
-    volatile int rh;
-    volatile Operation* op;
-    volatile bool deleted;
-    volatile bool removed;
-
-    NodeLF(int key);
 };
 
-class InsertOp : public Operation {
+class NodeBST {
 public:
-    bool isLeft;
-    NodeLF* expectedNode;
-    NodeLF* newNode;
+    int volatile key;
+    Operation* volatile op;
+    NodeBST* volatile left;
+    NodeBST* volatile right;
 
-    InsertOp(bool isLeft, NodeLF* expected, NodeLF* new);
+    NodeBST();
+    NodeBST(int k);
 };
 
-class RotateOp : public Operation {
+class ChildCASOp : public Operation {
 public:
-    volatile int state = 0;
-    NodeLF* parent;
-    NodeLF* node;
-    NodeLF* child;
-    Operation* parentOp;
-    Operation* nodeOp;
-    Operation* childOp;
-    bool rightR;
-    bool dir;
-    int oldKey;
-    int newKey;
+    bool is_left;
+    NodeBST* expected;
+    NodeBST* update;
 
-    RotateOp(NodeLF* node, Operation* nodeOp, int oldKey, int newKey);
-}
+    ChildCASOp(bool is_left, NodeBST* old_n, NodeBST* new_n);
+};
 
-class RelocateOp : Operation {
-    int volatile state = ONGOING;
-    NodeLF* dest;
-    Operation* destOp;
-    int removeKey;
-    int replaceKey;
-}
+class RelocateOp : public Operation {
+public:
+    int volatile state = 0;
+    NodeBST* dest;
+    Operation* dest_op;
+    int key_to_remove;
+    int key_to_put;
 
+    RelocateOp(NodeBST* curr, Operation* curr_op, int curr_key, int new_key);
+};
 
 class AVLTreeLF {
 public:
-    NodeLF* root;
+    NodeBST root;
     AVLTreeLF();
     ~AVLTreeLF();
 
@@ -65,16 +44,9 @@ public:
     bool search(int key);
 
 private:
-    NodeLF* rightRotate(NodeLF* y);
-    NodeLF* leftRotate(NodeLF* x);
-    int getBalance(NodeLF* N) const;
-    int height(NodeLF* N) const;
-    NodeLF* minValueNode(NodeLF* node);
-
-    NodeLF* insertHelper(NodeLF* node, int key, bool& err);
-    NodeLF* deleteHelper(NodeLF* node, int key, bool& err);
-    bool searchHelper(NodeLF* node, int key) const;
-    void freeTree(NodeLF* node);
-
-    bool compareAndSwap(NodeLF* node1, NodeLF* node2);
+    int find(int k, NodeBST*& parent, Operation*& parent_op, NodeBST*& curr, Operation*& curr_op, NodeBST* root);
+    void help(NodeBST* parent, Operation* parent_op, NodeBST* curr, Operation* curr_op);
+    void helpMarked(NodeBST* parent, Operation* parent_op, NodeBST* curr);
+    void helpChildCAS(Operation* op, NodeBST* dest);
+    bool helpRelocate(Operation* op, NodeBST* parent, Operation* parentOp, NodeBST* curr);
 };

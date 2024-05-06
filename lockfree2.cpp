@@ -52,18 +52,18 @@ template void kcas::add<Node*>(casword<Node*>*, Node*, Node*);
 
 
 
-Node::Node(int k, int v) {
+Node::Node(int k, int v, Node* p) {
     ver.setInitVal(0);
     key.setInitVal(k);
     left.setInitVal((Node*)NULL);
     right.setInitVal((Node*)NULL);
-    parent.setInitVal((Node*)NULL);
+    parent.setInitVal(p);
     height.setInitVal(1);
     val.setInitVal(v);
 }
 AVLTree::AVLTree() {
-    Node* maxNode = new Node(100000000, 0);
-    Node* minNode = new Node(0, 0);
+    Node* maxNode = new Node(100000000, 0, (Node*)NULL);
+    Node* minNode = new Node(0, 0, (Node*)NULL);
     kcas::start();
     kcas::add(&maxNode->left, (Node*)NULL, minNode);
     kcas::add(&minNode->parent, (Node*)NULL, maxNode);
@@ -130,7 +130,7 @@ bool AVLTree::insertIfAbsent(int k, int v) {
         if (res)
             return false;
         kcas::start();
-        Node* n = new Node(k, v);
+        Node* n = new Node(k, v, p);
         if (k > p->key)
             kcas::add(&p->right, (Node*)NULL, n);
         else if (k < p->key)
@@ -138,7 +138,6 @@ bool AVLTree::insertIfAbsent(int k, int v) {
         else
             continue;
         uint64_t pVerNew = pVer+2;
-        kcas::add(&n->parent, (Node*)NULL, p);
         kcas::add(&a->ver, aVer, aVer,
         &p->ver, pVer, pVerNew);
         if (kcas::execute()) {

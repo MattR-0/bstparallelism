@@ -4,7 +4,8 @@ import numpy as np
 
 ###### Speedup
 i = 1
-filename = "./result/speedup_results_" + str(i) + ".txt"
+capacity = 100000
+filename = "./result/speedup_results_" + str(i) + "_" + str(capacity) + ".txt"
 with open(filename, "r") as file:
     outcome = file.read()
 
@@ -77,16 +78,16 @@ for match in matches:
     total_time.append(float(match[6]))
     throughput.append(float(match[7]) / 1e5)  # Convert to million operations per second
 
-total = np.array(capacity) * np.array(threads)
-print(capacity)
-print(threads)
-print(throughput)
-print(total)
+# total = np.array(capacity) * np.array(threads)
+# print(capacity)
+# print(threads)
+# print(throughput)
+# print(total)
 
 # Plotting
-capacity = [1000000, 100000, 10000]
-len_threads = len(set(threads))
-threads = threads[:len_threads]
+# capacity = [1000000, 100000, 10000]
+# threads = [1, 2, 4, 8, 16, 32, 64, 128]
+# len_threads = len(set(threads))
 
 k = 0
 for cap in capacity:

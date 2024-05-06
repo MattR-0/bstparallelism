@@ -1,23 +1,40 @@
 #include <bits/stdc++.h>
 #include "coarsegrained.h"
+#include "finegrained.h"
+// #include "lockfree2.h"
+#include "lockfree.h"
+
 using namespace std;
 
 // Coarse-grained: IMPL=1, fine-grained: IMPL=2, lock-free: IMPL=3
 int IMPL;
 
 AVLTreeCG *treeCG;
+AVLTreeFG *treeFG;
+// AVLTree *treeLF;
+AVLTreeLF *treeBST;
 
 /* UTILITY FUNCTIONS */
 void printImpl() {
     if (IMPL == 1) printf("Coarse-Grained AVL Tree\n");
+    if (IMPL == 2) printf("Fine-Grained AVL Tree\n");
+    // if (IMPL == 3) printf("Lock-free AVL Tree \n");
+    if (IMPL == 4) printf("Lock-free BST \n");
 }
 
 void initTree() {
-    if (IMPL == 1) treeCG = new AVLTreeCG();
+    if (IMPL==1) treeCG = new AVLTreeCG();
+    if (IMPL==2) treeFG = new AVLTreeFG();
+    // if (IMPL==3) treeLF = new AVLTree();
+    if (IMPL==4) treeBST = new AVLTreeLF();
+    printf("Tree initialized\n");
 }
 
 void deleteTree() {
-    if (IMPL == 1) delete treeCG;
+    if (IMPL==1) delete treeCG;
+    if (IMPL==2) delete treeFG;
+    // if (IMPL==3) delete treeLF;
+    if (IMPL==4) delete treeBST;    
 }
 
 std::vector<int> getBlockVector(int low, int high) {
@@ -35,16 +52,25 @@ std::vector<int> getShuffledVector(int low, int high) {
     return v;
 }
 
-void flexInsert(int k) {
-    if (IMPL==1) treeCG->insert(k);
+bool flexInsert(int k) {
+    if (IMPL==1) return treeCG->insert(k);
+    if (IMPL==2) return treeFG->insert(k);
+    // if (IMPL==3) return treeLF->insert(k);
+    if (IMPL==4) return treeBST->insert(k);
 }
 
-void flexDelete(int k) {
-    if (IMPL==1) treeCG->deleteNode(k);
+bool flexDelete(int k) {
+    if (IMPL==1) return treeCG->deleteNode(k);
+    if (IMPL==2) return treeFG->deleteNode(k);
+    // if (IMPL==3) return treeLF->deleteNode(k);
+    if (IMPL==4) return treeBST->deleteNode(k);
 }
 
-void flexSearch(int k) {
-    if (IMPL==1) treeCG->search(k);
+bool flexSearch(int k) {
+    if (IMPL==1) return treeCG->search(k);
+    if (IMPL==2) return treeFG->search(k);
+    // if (IMPL==3) return treeLF->search(k);
+    if (IMPL==4) return treeBST->search(k);
 }
 
 /* HELPER FUNCTIONS */
@@ -197,15 +223,15 @@ void testRandomSearch(int numThreads, int threadCapacity, ofstream& outFile) {
     deleteTree();
 }
 
-// (insert, delete, search) = (50%, 30%, 20%)
+// (insert, delete, search) = (30%, 30%, 40%)
 void testRandom1(int numThreads, int threadCapacity, ofstream& outFile) {
     initTree();
     // All operations
     std::vector<int> keyVector = getShuffledVector(0, numThreads * threadCapacity);
 
     // Ratio
-    int numInsert = int(keyVector.size() * 0.5); // 50% insert
-    int numDelete = int(keyVector.size() * 0.3); // 30% delete
+    int numInsert = int(keyVector.size() * 0.2); // 50% insert
+    int numDelete = int(keyVector.size() * 0.1); // 30% delete
     // int numSearch = int(keyVector.size() * 0.2); // 20% search 
 
     // Measure time for insert operations
@@ -237,7 +263,7 @@ void testRandom1(int numThreads, int threadCapacity, ofstream& outFile) {
 int main(int argc, char const *argv[]) {
     std::vector<int> numThreads = {1, 2, 4, 8, 16, 32, 64, 128};
     std::vector<int> threadCapacities = {1000000, 100000, 10000};
-    std::vector<int> impl = {1, 2, 3};
+    std::vector<int> impl = {1};
 
     // Throughput
     for (int m : impl) {

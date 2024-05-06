@@ -1,35 +1,19 @@
 // Sequential implementation of AVL tree
 #include <bits/stdc++.h>
+#include "sequential.h"
 using namespace std;
 
-// An AVL tree node
-class Node {
-    public:
-    int key;
-    Node *left;
-    Node *right;
-    int height;
-};
-
 // A utility function to get height of tree
-int height(Node *N) {
+int AVLTree::height(Node *N) {
     if (N==NULL)
         return 0;
     return N->height;
 }
 
-// Helper function that allocates a new node with the given key
-Node *newNode(int key) {
-    Node *node = new Node();
-    node->key = key;
-    node->left = NULL;
-    node->right = NULL;
-    node->height = 1;
-    return(node);
-}
+Node::Node(int k) : key(k), left(nullptr), right(nullptr), height(1) {}
 
 // A utility function to right rotate subtree rooted with y
-Node *rightRotate(Node *y) {
+Node* AVLTree::rightRotate(Node *y) {
     Node *x = y->left;
     Node *T2 = x->right;
     // Perform rotation
@@ -43,7 +27,7 @@ Node *rightRotate(Node *y) {
 }
 
 // A utility function to left rotate subtree rooted with x
-Node *leftRotate(Node *x) {
+Node* AVLTree::leftRotate(Node *x) {
     Node *y = x->right;
     Node *T2 = y->left;
     // Perform rotation
@@ -57,22 +41,27 @@ Node *leftRotate(Node *x) {
 }
 
 // Get balance factor of node N
-int getBalance(Node *N) {
+int AVLTree::getBalance(Node *N) {
     if (N == NULL)
         return 0;
     return height(N->left)-height(N->right);
 }
 
+// Public insert function that wraps the helper
+void AVLTree::insert(int key) {
+    root = insertHelper(root, key);
+}
+
 // Recursive function to insert a key in the subtree rooted with node and
 // returns the new root of the subtree.
-Node *insert(Node *node, int key) {
+Node* AVLTree::insertHelper(Node *node, int key) {
     // 1. Perform the normal BST insertion
     if (node==NULL)
-        return(newNode(key));
+        return(new Node(key));
     if (key < node->key)
-        node->left = insert(node->left, key);
+        node->left = insertHelper(node->left, key);
     else if (key > node->key)
-        node->right = insert(node->right, key);
+        node->right = insertHelper(node->right, key);
     else // Equal keys are not allowed in BST
         return node;
     // 2. Update height of this ancestor node
@@ -102,7 +91,7 @@ Node *insert(Node *node, int key) {
 }
 
 // Return the node with minimum key value in the given tree.
-Node *minValueNode(Node *node) {
+Node* AVLTree::minValueNode(Node *node) {
     Node *current = node;
     // Loop down to find the leftmost leaf
     while (current->left!=NULL)
@@ -110,18 +99,23 @@ Node *minValueNode(Node *node) {
     return current;
 }
 
+// Public delete function that wraps the helper
+void AVLTree::deleteNode(int key) {
+    root = deleteNodeHelper(root, key);
+}
+
 // Recursive function to delete a node with given key from subtree with
 // given root. It returns root of the modified subtree.
-Node *deleteNode(Node *root, int key) {
+Node* AVLTree::deleteNodeHelper(Node *root, int key) {
     // STEP 1: PERFORM STANDARD BST DELETE
     if (root==NULL)
         return root;
     // Key to be deleted lies in left subtree
     if (key < root->key)
-        root->left = deleteNode(root->left, key);
+        root->left = deleteNodeHelper(root->left, key);
     // Key to be deleted lies in right subtree
     else if (key > root->key)
-        root->right = deleteNode(root->right, key);
+        root->right = deleteNodeHelper(root->right, key);
     // This is the node to be deleted
     else {
         if (root->left==NULL || root->right==NULL) {
@@ -141,7 +135,7 @@ Node *deleteNode(Node *root, int key) {
             // Copy the inorder successor's data to this node
             root->key = temp->key;
             // Delete the inorder successor
-            root->right = deleteNode(root->right, temp->key);
+            root->right = deleteNodeHelper(root->right, temp->key);
         }
     }
     // If the tree had only one node then return
@@ -171,20 +165,26 @@ Node *deleteNode(Node *root, int key) {
     return root;
 }
 
+// Public search function that wraps the helper
+bool AVLTree::search(int key) {
+    bool found = searchHelper(root, key);
+    return found;
+}
+
 // Search for the given key in the subtree rooted with given node
-bool search(Node* node, int key) {
+bool AVLTree::searchHelper(Node* node, int key) {
     if (node==NULL)
         return false;
     else if (node->key==key)
         return true;
     else if (node->key<key)
-        return search(node->right, key);
-    return search(node->left, key);
+        return searchHelper(node->right, key);
+    return searchHelper(node->left, key);
 }
 
 // A utility function to print preorder traversal of the tree.
 // The function also prints the height of every node.
-void preOrder(Node *root) {
+void AVLTree::preOrder(Node *root) {
     if(root!=NULL) {
         cout << root->key << " ";
         preOrder(root->left);
@@ -192,37 +192,42 @@ void preOrder(Node *root) {
     }
 }
 
-// Driver Code
-int main() {
-    Node *root = NULL;
-    // Constructing example tree
-    root = insert(root, 10);
-    root = insert(root, 20);
-    root = insert(root, 30);
-    root = insert(root, 40);
-    root = insert(root, 50);
-    root = insert(root, 25);
-    /* The constructed AVL Tree would be
-            30
-            / \
-           20 40
-          / \   \
-         10 25  50
-    */
-    cout << "Preorder traversal of the constructed AVL tree: \n";
-    preOrder(root);
+// // Driver Code
+// int main() {
+//     AVLTree* avl_tree = new AVLTree(); // Create an instance of AVLTree
+//     // Constructing example tree
+//     avl_tree->insert(10);
+//     avl_tree->insert(20);
+//     avl_tree->insert(30);
+//     avl_tree->insert(40);
+//     avl_tree->insert(50);
+//     avl_tree->insert(25);
 
-    root = deleteNode(root, 10);
-    /* The AVL Tree after deletion of 10
-         1
-        / \
-       0   9
-      /   / \
-    -1   5   11
-        / \
-       2   6
-    */
-    cout << "Preorder traversal after deletion of 10: \n";
-    preOrder(root);
-    return 0;
-}
+//     /* The constructed AVL Tree would be
+//             30
+//             / \
+//            20 40
+//           / \   \
+//          10 25  50
+//     */
+//     std::cout << "Preorder traversal of the constructed AVL tree: \n";
+//     avl_tree->preOrder(avl_tree->root);
+//     printf("\n");
+
+//     avl_tree->deleteNode(10);
+
+//     /* The AVL Tree after deletion of 10
+//          1
+//         / \
+//        0   9
+//       /   / \
+//     -1   5   11
+//         / \
+//        2   6
+//     */
+//     std::cout << "Preorder traversal after deletion of 10: \n";
+//     avl_tree->preOrder(avl_tree->root);
+//     printf("\n");
+    
+//     return 0;
+// }

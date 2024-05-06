@@ -108,10 +108,13 @@ int checkHeightAndBalanceCG(NodeCG* node) {
 
 int checkHeightAndBalanceFG(NodeFG* node) {
     if (node==nullptr) return 0;
+    // if (node->key == -1) return 2;
     int leftHeight = checkHeightAndBalanceFG(node->left);
     int rightHeight = checkHeightAndBalanceFG(node->right);
-    if (node->height != 1+std::max(leftHeight, rightHeight))
+    if (node->height != 1+std::max(leftHeight, rightHeight)) {
+        printf("Error at node %d expected height %d, observed height %d \n", node->key, node->height, node->height);
         throw std::runtime_error("Node height is incorrect");
+    }
     int balance = leftHeight-rightHeight;
     if (balance<-1 || balance>1)
         throw std::runtime_error("Node is unbalanced");
@@ -176,8 +179,9 @@ void testSequentialSearch() {
         treeRoot->left->left->right=new NodeCG(2);
     }
     if (IMPL==2) {
-        treeFG->root=new NodeFG(20);
-        NodeFG* treeRoot = treeFG->root;
+        treeFG->root = new NodeFG(INT_MAX); // virtual root
+        treeFG->root->left = new NodeFG(20); // real root
+        NodeFG* treeRoot = treeFG->root->left;
         treeRoot->left=new NodeFG(12);
         treeRoot->right=new NodeFG(53);
         treeRoot->left->left=new NodeFG(1);
@@ -249,7 +253,6 @@ void testConcurrentInsert() {
     }
     for (int i=0; i<NUM_THREADS; i++) {
         threads[i].join();
-        printf("Reached here\n");
     }
     for (int i=1; i<=NUM_THREADS*100; i++) {
         if (!flexSearch(i)) {
@@ -382,6 +385,7 @@ void testInsertDeleteSpread() {
 
 /* MAIN FUNCTION */
 int main() {
+    printf("Got here \n");
     testSequentialSearch();
 	testSequentialInsert();
 	testSequentialDelete();

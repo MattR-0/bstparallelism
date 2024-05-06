@@ -5,7 +5,7 @@
 
 // Operation marking status
 enum opFlag {
-    NONE, MARK, ROTATE, INSERT
+    NONE, MARK, ROTATE, INSERT, RELOCATE
 };
 
 Operation* AVLTreeLF::flag(Operation* op, int status) {
@@ -47,9 +47,12 @@ int AVLTreeLF::seek(int key, NodeLF** parent, Operation** parentOp, NodeLF** nod
         result = -1;
         *node = auxRoot;
         *nodeOp = (*node)->op;
-        if (getFlag(*nodeOp)!=NONE && auxRoot==root) {
-            helpInsert(unflag(*nodeOp), *node);
-            continue;
+        if (getFlag(*nodeOp)!=NONE) {
+            if (auxRoot==root) {
+                helpInsert(unflag(*nodeOp), *node);
+                continue;
+            } else
+                return -2;
         }
         next = (*node)->right;
         while (next!=nullptr) {
@@ -97,7 +100,7 @@ bool AVLTreeLF::insert(int key) {
         bool isLeft = (result==-1);
         NodeLF* oldNode = isLeft ? current->left : current->right;
         casOp = new InsertOp(isLeft, oldNode, newNode);
-        if (__sync_bool_compare_and_swap(current->op, currentOp, flag(casOp, INSERT)) {
+        if (__sync_bool_compare_and_swap(&current->op, currentOp, flag(casOp, INSERT)) {
             helpInsert(casOp, current);
             return true;
         }
@@ -107,15 +110,28 @@ bool AVLTreeLF::insert(int key) {
 bool AVLTreeLF::deleteNode(int key) {
     NodeLF* parent;
     NodeLF* node;
+    NodeLF* newNode;
     Operation* parentOp;
     Operation* nodeOp;
+    Operation* newNodeOp;
     while (true) {
         int result = seek(key, &parent, &parentOp, &node, &nodeOp, root);
         if (result!=0)
             return false;
-        if (__sync_bool_compare_and_swap(&(node->op), nodeOp, SET_FLAG(currOp, MARK))) {
-            helpMarked(parent, parentOp, node);
-            return true;
+        if (node->left==nullptr || node->right==nullptr) {
+            if (__sync_bool_compare_and_swap(&node->op, nodeOp, SET_FLAG(nodeOp, MARK))) {
+                helpMarked(parent, parentOp, node);
+                return true;
+            }
+        }
+        else {
+            if (seek(key, parent, parentOp, newNode, newNodeOp, node) == -2 || (node->op!=nodeOp))
+                continue;
+            RelocateOp relocateOp = new RelocateOp(node, nodeOp, key, newNode->key);
+            if (__sync_bool_compare_and_swap(&newNode->op, newNodeOp, flag(relocateOp, RELOCATE))) {
+                if (helpRelocate(relocateOp, parent, parentOp, newNode))
+                    return true;
+            }
         }
     }
 }
@@ -156,4 +172,28 @@ void helpMarked(NodeLF* parent, Operation* parentOp, NodeLF* node) {
         delete casOp;
 }
 
-// HELP_ROTATE:
+bool helpRelocate(RelocateOp* op, Node* pred, Operation* predOp, Node* curr) {
+    int seenState = op->state;
+    if (seenState == ONGOING) {
+        Operation* seenOp = VCAS(&op->dest->op, op->destOp, FLAG(op, RELOCATE));
+        if ((seenOp == op->destOp) || (seenOp == FLAG(op, RELOCATE))) {
+            CAS(&op->state, ONGOING, SUCCESSFUL);
+            seenState = SUCCESSFUL;
+        } else {
+            seenState = VCAS(&op->state, ONGOING, FAILED);
+        }
+    }
+    if (seenState == SUCCESSFUL) {
+        CAS(&op->dest->key, removeKey, replaceKey);
+        CAS(&op->dest->op, FLAG(op, RELOCATE), FLAG(op, NONE));
+    }
+    bool result = (seenState == SUCCESSFUL);
+    if (op->dest == curr)
+        return result;
+    CAS(&curr->op, FLAG(op, RELOCATE), FLAG(op, result ? MARK : NONE));
+    if (result) {
+    if (op->dest == pred) predOp = FLAG(op, NONE);
+        helpMarked(pred, predOp, curr);
+    }
+    return result;
+}

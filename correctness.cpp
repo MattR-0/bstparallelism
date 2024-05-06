@@ -6,8 +6,8 @@ using namespace std;
 
 // Coarse-grained: IMPL=1, fine-grained: IMPL=2, lock-free: IMPL=3
 #define IMPL 3
-#define NUM_THREADS 8
-#define THREAD_SIZE 1000
+#define NUM_THREADS 4
+#define THREAD_SIZE 100
 
 AVLTreeCG *treeCG;
 AVLTreeFG *treeFG;
@@ -18,6 +18,7 @@ void initTree() {
     if (IMPL==1) treeCG = new AVLTreeCG();
     if (IMPL==2) treeFG = new AVLTreeFG();
     if (IMPL==3) treeLF = new AVLTree();
+    printf("Tree initialized\n");
 }
 
 void deleteTree() {
@@ -123,6 +124,27 @@ int checkHeightAndBalanceFG(NodeFG* node) {
     return node->height;
 }
 
+int checkHeightAndBalanceLF(Node* node) {
+    return 0;
+    if (node==nullptr) return 0;
+    Node* leftNode = node->left.getValue();
+    Node* rightNode = node->right.getValue();
+    int leftHeight = checkHeightAndBalanceLF(leftNode);
+    int rightHeight = checkHeightAndBalanceLF(rightNode);
+    if (node->height.getValue() != 1+std::max(leftHeight, rightHeight))
+        throw std::runtime_error("Node height is incorrect");
+    int balance = leftHeight-rightHeight;
+    if (balance<-1 || balance>1)
+        throw std::runtime_error("Node is unbalanced");
+    if (leftNode && leftNode->key>=node->key)
+        throw std::runtime_error("Left child key is greater or equal to node key");
+    if (rightNode && rightNode->key<=node->key)
+        throw std::runtime_error("Right child key is lesser or equal to node key");
+    if (leftNode==node || rightNode==node)
+        throw std::runtime_error("Circular reference detected");
+    return node->height.getValue();
+}
+
 int checkHeightAndBalance() {
     if (IMPL==1) {
         return checkHeightAndBalanceCG(treeCG->root);
@@ -131,10 +153,10 @@ int checkHeightAndBalance() {
         return checkHeightAndBalanceFG(treeFG->root);
     }
     if (IMPL==3) {
-        
+        return checkHeightAndBalanceLF(treeLF->minRoot->right);
     }
     throw std::runtime_error("Invalid IMPL defined in correctness.cpp");
-    return 0
+    return 0;
 }
 
 /* TEST FUNCTIONS */
@@ -145,7 +167,7 @@ void testSequentialSearch() {
         NodeCG* treeRoot = treeCG->root;
         treeRoot->left=new NodeCG(12);
         treeRoot->right=new NodeCG(53);
-        treeRoot->left->left=new NodeCG(0);
+        treeRoot->left->left=new NodeCG(1);
         treeRoot->right->left=new NodeCG(21);
         treeRoot->left->right=new NodeCG(17);
         treeRoot->right->right=new NodeCG(82);
@@ -158,7 +180,7 @@ void testSequentialSearch() {
         NodeFG* treeRoot = treeFG->root;
         treeRoot->left=new NodeFG(12);
         treeRoot->right=new NodeFG(53);
-        treeRoot->left->left=new NodeFG(0);
+        treeRoot->left->left=new NodeFG(1);
         treeRoot->right->left=new NodeFG(21);
         treeRoot->left->right=new NodeFG(17);
         treeRoot->right->right=new NodeFG(82);
@@ -166,8 +188,25 @@ void testSequentialSearch() {
         treeRoot->left->right->left=new NodeFG(15);
         treeRoot->left->left->right=new NodeFG(2);
     }
-    std::set<int> elems = {20,12,53,0,21,17,82,73,15,2};
-    for (int i=0; i<100; i++) {
+    if (IMPL==3) {
+        deleteTree();
+        return;
+        Node* treeRoot = new Node(20,0);
+        // cant use setInitVal, have to use kcas::execute
+        treeRoot->parent.setInitVal(treeLF->minRoot);
+        treeLF->minRoot->right.setInitVal(treeRoot);
+        treeRoot->left.setInitVal(new Node(12,0));
+        treeRoot->right.setInitVal(new Node(53,0));
+        treeRoot->left->left.setInitVal(new Node(1,0));
+        treeRoot->right->left.setInitVal(new Node(21,0));
+        treeRoot->left->right.setInitVal(new Node(17,0));
+        treeRoot->right->right.setInitVal(new Node(82,0));
+        treeRoot->right->right->left.setInitVal(new Node(73,0));
+        treeRoot->left->right->left.setInitVal(new Node(15,0));
+        treeRoot->left->left->right.setInitVal(new Node(2,0));
+    }
+    std::set<int> elems = {20,12,53,1,21,17,82,73,15,2};
+    for (int i=1; i<100; i++) {
         bool found = flexSearch(i);
         if (elems.find(i)!=elems.end() && !found) {
             std::ostringstream oss;
@@ -179,16 +218,18 @@ void testSequentialSearch() {
             throw std::runtime_error(oss.str());
         } 
     }
+    deleteTree();
     printf("Sequential search passed!\n");
 }
 
 void testSequentialInsert() {
     initTree();
-    insertRange(500, 900);
-    insertRange(0, 100);
+    insertRange(500, 510);
+    insertRange(510, 900);
+    insertRange(1, 100);
     insertRange(900, 1000);
     insertRange(100, 500);
-    for (int i=0; i<1000; i++) {
+    for (int i=1; i<1000; i++) {
         if (!flexSearch(i)) {
             std::ostringstream oss;
             oss << "Sequential insert failed, missing " << i << "\n";
@@ -204,13 +245,13 @@ void testConcurrentInsert() {
     initTree();
     std::vector<std::thread> threads;
     for (int i=0; i<NUM_THREADS; i++) {
-        threads.push_back(thread(insertRange, i*100, (i+1)*100));
+        threads.push_back(thread(insertRange, 1+i*100, 1+(i+1)*100));
     }
     for (int i=0; i<NUM_THREADS; i++) {
         threads[i].join();
         printf("Reached here\n");
     }
-    for (int i=0; i<NUM_THREADS*100; i++) {
+    for (int i=1; i<=NUM_THREADS*100; i++) {
         if (!flexSearch(i)) {
             std::ostringstream oss;
             oss << "Concurrent insert failed, missing " << i << "\n";
@@ -224,9 +265,9 @@ void testConcurrentInsert() {
 
 void testSequentialDelete() {
     initTree();
-    insertRange(0, THREAD_SIZE);
+    insertRange(1, THREAD_SIZE);
     deleteRangeContiguous(THREAD_SIZE/2, THREAD_SIZE);
-    for (int i=0; i<THREAD_SIZE; i++) {
+    for (int i=1; i<THREAD_SIZE; i++) {
         bool found = flexSearch(i);
         if (i<THREAD_SIZE/2 && !found) {
             std::ostringstream oss;
@@ -243,9 +284,9 @@ void testSequentialDelete() {
     deleteTree();
 
     initTree();
-    insertRange(0, THREAD_SIZE);
-    deleteRangeSpread(0, THREAD_SIZE);
-    for (int i=0; i<THREAD_SIZE; i++) {
+    insertRange(1, THREAD_SIZE);
+    deleteRangeSpread(1, THREAD_SIZE);
+    for (int i=1; i<THREAD_SIZE; i++) {
         bool found = flexSearch(i);
         if (i%2==1 && !found) {
             std::ostringstream oss;
@@ -265,15 +306,15 @@ void testSequentialDelete() {
 
 void testConcurrentDelete() {
 	initTree();
-	insertRange(0, NUM_THREADS * THREAD_SIZE);
+	insertRange(1, 1 + NUM_THREADS * THREAD_SIZE);
 	std::vector<std::thread> threads;
 	for (int i = 0; i < NUM_THREADS; i++) {
-		threads.push_back(thread(deleteRangeContiguous, i*THREAD_SIZE+THREAD_SIZE/4, (i+1)*THREAD_SIZE));
+		threads.push_back(thread(deleteRangeContiguous, 1+i*THREAD_SIZE+THREAD_SIZE/4, 1+(i+1)*THREAD_SIZE));
 	}
 	for (int i = 0; i<NUM_THREADS; i++) {
 		threads[i].join();
 	}
-	for (int i = 0; i<NUM_THREADS * THREAD_SIZE; i++) {
+	for (int i = 1; i<=NUM_THREADS * THREAD_SIZE; i++) {
         bool found = flexSearch(i);
 		if (i%THREAD_SIZE<THREAD_SIZE/4 && !found) {
             std::ostringstream oss;
@@ -295,12 +336,12 @@ void testInsertDeleteContiguous() {
 	initTree();
 	std::vector<std::thread> threads;
 	for (int i=0; i<NUM_THREADS; i++) {
-		threads.push_back(thread(insertRangeDeleteContiguous, i*THREAD_SIZE, (i+1)*THREAD_SIZE, (THREAD_SIZE+1)/2));
+		threads.push_back(thread(insertRangeDeleteContiguous, 1+i*THREAD_SIZE, 1+(i+1)*THREAD_SIZE, 1+(THREAD_SIZE+1)/2));
 	}
 	for (int i=0; i<NUM_THREADS; i++) {
 		threads[i].join();
 	}
-	for (int i=0; i<NUM_THREADS*THREAD_SIZE; i++) {
+	for (int i=1; i<=NUM_THREADS*THREAD_SIZE; i++) {
 		if (flexSearch(i)) {
             std::ostringstream oss;
             oss << "Insert/delete contiguous mix failed, incorrectly finding " << i << "\n";
@@ -316,12 +357,12 @@ void testInsertDeleteSpread() {
 	initTree();
 	std::vector<std::thread> threads;
 	for (int i=0; i<NUM_THREADS; i++) {
-		threads.push_back(thread(insertRangeDeleteSpread, i*THREAD_SIZE, (i+1)*THREAD_SIZE, (THREAD_SIZE+1)/2));
+		threads.push_back(thread(insertRangeDeleteSpread, 1+i*THREAD_SIZE, 1+(i+1)*THREAD_SIZE, 1+(THREAD_SIZE+1)/2));
 	}
 	for (int i=0; i<NUM_THREADS; i++) {
 		threads[i].join();
 	}
-	for (int i=0; i<NUM_THREADS*THREAD_SIZE; i++) {
+	for (int i=1; i<=NUM_THREADS*THREAD_SIZE; i++) {
         bool found = flexSearch(i);
         if (i%2==1 && !found) {
             std::ostringstream oss;

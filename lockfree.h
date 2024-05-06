@@ -45,6 +45,15 @@ public:
     RotateOp(NodeLF* node, Operation* nodeOp, int oldKey, int newKey);
 }
 
+class RelocateOp : Operation {
+    int volatile state = ONGOING;
+    NodeLF* dest;
+    Operation* destOp;
+    int removeKey;
+    int replaceKey;
+}
+
+
 class AVLTreeLF {
 public:
     NodeLF* root;
